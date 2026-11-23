@@ -29,5 +29,11 @@ Updated \code{slurmpilot_resources} object.
 \description{
 Creates a copy of a \code{slurmpilot_resources} specification with memory and/or
 walltime scaled by positive multipliers, commonly used when surgically
-retrying failed \code{OUT_OF_MEMORY} or \code{TIMEOUT} chunks.
+retrying failed \code{OUT_OF_MEMORY} or \code{TIMEOUT} chunks. Preserves exact
+chunk-to-task assignments.
+}
+\examples{
+base <- resource_spec(n_tasks = 20, chunk_size = 5, mem_mb = 1024, time_minutes = 10)
+bumped <- scale_resources(base, mem_multiplier = 1.5, time_multiplier = 2.0)
+as_slurm_flags(bumped)
 }

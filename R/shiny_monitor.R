@@ -28,6 +28,12 @@ sp_state_badge_class <- function(state) {
 #' @return A `bslib` card UI element.
 #' @seealso [mod_hpc_monitor_server()], [mod_hpc_submit_ui()]
 #' @export
+#' @examples
+#' if (requireNamespace("shiny", quietly = TRUE) &&
+#'     requireNamespace("bslib", quietly = TRUE)) {
+#'   ui <- mod_hpc_monitor_ui("hpc_mon")
+#'   inherits(ui, "shiny.tag")
+#' }
 mod_hpc_monitor_ui <- function(id, title = "Cluster Job Telemetry") {
   sp_check_shiny_deps()
   ns <- shiny::NS(id)
@@ -116,6 +122,27 @@ mod_hpc_monitor_ui <- function(id, title = "Cluster Job Telemetry") {
 #'
 #' @seealso [mod_hpc_monitor_ui()], [mod_hpc_submit_server()]
 #' @export
+#' @examples
+#' \donttest{
+#' if (interactive() && requireNamespace("shiny", quietly = TRUE) &&
+#'     requireNamespace("bslib", quietly = TRUE)) {
+#'   ui <- bslib::page_fluid(
+#'     mod_hpc_submit_ui("sub"),
+#'     mod_hpc_monitor_ui("mon")
+#'   )
+#'   server <- function(input, output, session) {
+#'     be <- mock_slurm_backend(max_workers = 2L)
+#'     sub <- mod_hpc_submit_server(
+#'       "sub",
+#'       backend = be,
+#'       fun = function(x) x^2,
+#'       args_builder = function(n) as.list(seq_len(n))
+#'     )
+#'     mod_hpc_monitor_server("mon", job = sub$job)
+#'   }
+#'   shiny::shinyApp(ui, server)
+#' }
+#' }
 mod_hpc_monitor_server <- function(
   id,
   job,

@@ -9,7 +9,12 @@ slurm_retry(
   chunks = NULL,
   mem_multiplier = NULL,
   time_multiplier = NULL,
-  resources = NULL
+  resources = NULL,
+  adaptive = TRUE,
+  auto_mem_multiplier = 1.5,
+  auto_time_multiplier = 1.5,
+  max_mem_mb = 524288L,
+  max_time_minutes = 10080
 )
 }
 \arguments{
@@ -18,20 +23,56 @@ slurm_retry(
 \item{chunks}{Optional integer vector of chunk IDs to retry. Defaults to all
 chunks currently in \code{FAILED}, \code{OUT_OF_MEMORY}, \code{TIMEOUT}, or \code{CANCELLED}.}
 
-\item{mem_multiplier}{Optional numeric multiplier to bump \code{--mem} on retry
-(e.g., \code{1.5} after an \code{OUT_OF_MEMORY} failure).}
+\item{mem_multiplier}{Optional explicit numeric multiplier to bump \code{--mem} on
+retry (overrides adaptive OOM scaling when supplied).}
 
-\item{time_multiplier}{Optional numeric multiplier to bump \code{--time} on retry
-(e.g., \code{1.5} after a \code{TIMEOUT}).}
+\item{time_multiplier}{Optional explicit numeric multiplier to bump \code{--time}
+on retry (overrides adaptive TIMEOUT scaling when supplied).}
 
 \item{resources}{Optional explicit replacement \code{slurmpilot_resources} object
-(takes precedence over multipliers).}
+(takes precedence over multipliers and adaptive escalation).}
+
+\item{adaptive}{Logical; if \code{TRUE} (default), automatically escalates \code{--mem}
+for \code{OUT_OF_MEMORY} failures and \code{--time} for \code{TIMEOUT} failures.}
+
+\item{auto_mem_multiplier}{Adaptive \code{--mem} escalation factor for
+\code{OUT_OF_MEMORY} chunks. Default \code{1.5}.}
+
+\item{auto_time_multiplier}{Adaptive \code{--time} escalation factor for \code{TIMEOUT}
+chunks. Default \code{1.5}.}
+
+\item{max_mem_mb}{Maximum memory ceiling in MB for adaptive escalation.
+Default \code{524288L} (512 GiB).}
+
+\item{max_time_minutes}{Maximum walltime ceiling in minutes for adaptive
+escalation. Default \code{10080} (7 days).}
 }
 \value{
-Updated \code{slurmpilot_job} handle.
+Updated \code{slurmpilot_job} handle with appended \verb{$retry_history}
+provenance.
 }
 \description{
 Resubmits only unsuccessful array chunks while preserving already-completed
-chunk checkpoints on disk. Optionally scales \code{--mem} and/or \code{--time} via
-\code{\link[=scale_resources]{scale_resources()}} before resubmitting.
+chunk checkpoints on disk. Supports \strong{adaptive resource escalation}: when
+\code{adaptive = TRUE} (default), chunks that failed with \code{OUT_OF_MEMORY}
+automatically scale \code{--mem} by \code{auto_mem_multiplier} (capped at \code{max_mem_mb})
+and chunks that failed with \code{TIMEOUT} automatically scale \code{--time} by
+\code{auto_time_multiplier} (capped at \code{max_time_minutes}). Records per-chunk
+retry provenance accessible via \code{\link[=slurm_retry_history]{slurm_retry_history()}}.
+}
+\examples{
+be <- mock_slurm_backend(max_workers = 1L)
+job <- slurm_submit(
+  be, function(x) x^2, as.list(1:4),
+  resources = resource_spec(4L, chunk_size = 2L, mem_mb = 512L),
+  fault_injection = list(oom_chunks = 2L, fail_once = TRUE)
+)
+slurm_wait(job, poll_interval = 0.05)
+job <- slurm_retry(job)
+slurm_wait(job, poll_interval = 0.05)
+slurm_retry_history(job)
+unlink(be$root_dir, recursive = TRUE)
+}
+\seealso{
+\code{\link[=slurm_retry_history]{slurm_retry_history()}}, \code{\link[=scale_resources]{scale_resources()}}
 }

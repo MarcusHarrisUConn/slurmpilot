@@ -15,6 +15,12 @@
 #'
 #' @return Invisibly returns the result of [shiny::runApp()].
 #' @export
+#' @examples
+#' \donttest{
+#' if (interactive()) {
+#'   run_demo_app()
+#' }
+#' }
 run_demo_app <- function(launch.browser = interactive(), port = NULL, ...) {
   sp_check_shiny_deps()
   app_dir <- system.file("shiny", "demo", package = "slurmpilot")

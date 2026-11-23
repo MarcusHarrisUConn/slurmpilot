@@ -76,46 +76,53 @@ format_slurm_time <- function(seconds) {
 
 #' Parse a SLURM Time String to Seconds
 #'
-#' Parses SLURM elapsed/limit time strings such as `"MM:SS"`, `"HH:MM:SS"`, or
-#' `"D-HH:MM:SS"` into numeric seconds.
+#' Parses SLURM elapsed/limit time strings such as `"MM"`, `"MM:SS"`,
+#' `"HH:MM:SS"`, `"D-HH"`, `"D-HH:MM"`, or `"D-HH:MM:SS"` (with optional
+#' fractional seconds) into numeric seconds.
 #'
 #' @param x Character vector of SLURM time strings.
 #'
-#' @return Numeric vector of durations in seconds (`NA_real_` for unparseable
-#'   or missing inputs).
+#' @return Numeric vector of durations in seconds (`NA_real_` for unparseable,
+#'   `"UNLIMITED"`, `"INVALID"`, or missing inputs).
 #' @export
 #' @examples
-#' parse_slurm_time(c("05:30", "01:15:00", "2-03:00:00"))
+#' parse_slurm_time(c("05:30", "01:15:00", "2-03:00:10", "00:02:15.500"))
 parse_slurm_time <- function(x) {
-  if (length(x) == 0L) {
+  if (is.null(x) || length(x) == 0L) {
     return(numeric(0L))
   }
   vapply(as.character(x), function(s) {
     s <- trimws(s)
-    if (is.na(s) || !nzchar(s) || s %in% c("INVALID", "UNLIMITED", "NOT_SET", "NA")) {
+    if (is.na(s) || !nzchar(s) ||
+        toupper(s) %in% c("INVALID", "UNLIMITED", "NOT_SET", "NA", "PARTITION_LIMIT")) {
       return(NA_real_)
     }
     days <- 0
-    if (grepl("-", s, fixed = TRUE)) {
+    has_days <- grepl("-", s, fixed = TRUE)
+    if (has_days) {
       parts <- strsplit(s, "-", fixed = TRUE)[[1L]]
       if (length(parts) != 2L) return(NA_real_)
       days <- suppressWarnings(as.numeric(parts[[1L]]))
       s <- parts[[2L]]
     }
     hms <- suppressWarnings(as.numeric(strsplit(s, ":", fixed = TRUE)[[1L]]))
-    if (any(is.na(hms)) || is.na(days)) {
+    if (length(hms) == 0L || any(is.na(hms)) || is.na(days) || any(hms < 0) || days < 0) {
       return(NA_real_)
     }
     if (length(hms) == 3L) {
       days * 86400 + hms[[1L]] * 3600 + hms[[2L]] * 60 + hms[[3L]]
     } else if (length(hms) == 2L) {
-      if (days > 0) {
+      if (has_days) {
         days * 86400 + hms[[1L]] * 3600 + hms[[2L]] * 60
       } else {
         hms[[1L]] * 60 + hms[[2L]]
       }
     } else if (length(hms) == 1L) {
-      days * 86400 + hms[[1L]] * 60
+      if (has_days) {
+        days * 86400 + hms[[1L]] * 3600
+      } else {
+        hms[[1L]] * 60
+      }
     } else {
       NA_real_
     }
@@ -146,32 +153,36 @@ format_slurm_mem <- function(mem_mb) {
 
 #' Parse a SLURM Memory String to Megabytes
 #'
-#' Parses SLURM `MaxRSS` or `--mem` values (e.g., `"512K"`, `"2048M"`, `"4G"`,
-#' `"1.5T"`, or raw byte strings) into numeric megabytes (MiB).
+#' Parses SLURM `MaxRSS`, `ReqMem`, or `--mem` values — including standard
+#' units (`"512K"`, `"2048M"`, `"4G"`, `"0.5T"`), IEC units (`"2GiB"`), and
+#' SLURM per-CPU / per-node `ReqMem` suffixes (`"100Mc"`, `"200Mn"`, `"4Gc"`)
+#' — into numeric megabytes (MiB).
 #'
 #' @param x Character vector of SLURM memory strings.
 #'
 #' @return Numeric vector in megabytes (`NA_real_` for empty/invalid values).
 #' @export
 #' @examples
-#' parse_slurm_mem(c("524288K", "1024M", "2G"))
+#' parse_slurm_mem(c("1024K", "2.5G", "0.5T", "100Mc", "200Mn"))
 parse_slurm_mem <- function(x) {
-  if (length(x) == 0L) {
+  if (is.null(x) || length(x) == 0L) {
     return(numeric(0L))
   }
   vapply(as.character(x), function(s) {
     s <- trimws(s)
-    if (is.na(s) || !nzchar(s) || s %in% c("0", "NA")) {
-      return(if (identical(s, "0")) 0 else NA_real_)
+    if (is.na(s) || !nzchar(s) || toupper(s) %in% c("NA", "N/A")) {
+      return(NA_real_)
     }
-    m <- regexec("^([0-9]+(?:\\.[0-9]+)?)([KkMmGgTtBb]?)$", s)
+    # Handle optional SLURM per-CPU ('c') or per-node ('n') ReqMem suffix and IEC 'iB'/'B'
+    m <- regexec("^([0-9]+(?:\\.[0-9]+)?)\\s*([KkMmGgTtBb]?)(?:[Ii]?[Bb])?([CcNn]?)$", s)
     parts <- regmatches(s, m)[[1L]]
-    if (length(parts) != 3L) {
+    if (length(parts) != 4L) {
       return(NA_real_)
     }
     val <- suppressWarnings(as.numeric(parts[[2L]]))
     unit <- toupper(parts[[3L]])
     if (is.na(val)) return(NA_real_)
+    if (val == 0) return(0)
     if (!nzchar(unit)) return(val / (1024^2))
     switch(
       unit,
@@ -223,8 +234,29 @@ format_slurm_array_indices <- function(indices, max_concurrent = NULL) {
   spec
 }
 
+#' Parse a SLURM Array Expression into Expanded Integer Indices
+#'
+#' Expands SLURM array expressions such as `"1-100:2"`, `"1,3,5-9%4"`, or
+#' bracketed `squeue` expressions `"[1-4,6%2]"` into a vector of integer task
+#' indices.
+#'
+#' @param expr Character scalar SLURM array expression.
+#'
+#' @return Integer vector of expanded array indices (`integer(0L)` for empty
+#'   strings).
+#' @export
+#' @examples
+#' parse_slurm_array_spec("1-10:2")
+#' parse_slurm_array_spec("1,3,5-9%4")
+parse_slurm_array_spec <- function(expr) {
+  sp_expand_slurm_array_expr(expr)
+}
+
 sp_expand_slurm_array_expr <- function(expr) {
-  expr <- trimws(as.character(expr))
+  if (is.null(expr) || length(expr) == 0L || is.na(expr[[1L]])) {
+    return(integer(0L))
+  }
+  expr <- trimws(as.character(expr[[1L]]))
   # Strip surrounding brackets if present (from squeue e.g. [1-4,6%2])
   expr <- gsub("^\\[|\\]$", "", expr)
   # Strip optional concurrency throttle %N
@@ -236,15 +268,18 @@ sp_expand_slurm_array_expr <- function(expr) {
   out <- integer(0L)
   for (p in parts) {
     p <- trimws(p)
+    if (!nzchar(p)) next
     step <- 1L
     if (grepl(":", p, fixed = TRUE)) {
       sp <- strsplit(p, ":", fixed = TRUE)[[1L]]
-      p <- sp[[1L]]
-      step <- as.integer(sp[[2L]])
+      if (length(sp) != 2L) next
+      p <- trimws(sp[[1L]])
+      step <- suppressWarnings(as.integer(sp[[2L]]))
+      if (is.na(step) || step < 1L) next
     }
     if (grepl("-", p, fixed = TRUE)) {
-      bounds <- as.integer(strsplit(p, "-", fixed = TRUE)[[1L]])
-      if (length(bounds) == 2L && !any(is.na(bounds))) {
+      bounds <- suppressWarnings(as.integer(strsplit(p, "-", fixed = TRUE)[[1L]]))
+      if (length(bounds) == 2L && !any(is.na(bounds)) && bounds[[1L]] <= bounds[[2L]]) {
         out <- c(out, seq.int(bounds[[1L]], bounds[[2L]], by = step))
       }
     } else {
@@ -257,20 +292,114 @@ sp_expand_slurm_array_expr <- function(expr) {
   unique(out)
 }
 
-sp_partition_tasks <- function(n_tasks, chunk_size) {
+#' Plan Load-Balanced SLURM Array Chunk Assignments
+#'
+#' Partitions `n_tasks` tasks across `ceiling(n_tasks / chunk_size)` SLURM
+#' array chunks using one of three strategies:
+#' - `"contiguous"`: sequential contiguous slices (default).
+#' - `"round_robin"`: interleaved modulo assignment, useful when tasks are
+#'   ordered monotonically by problem size.
+#' - `"lpt"`: Longest Processing Time first greedy load balancing using
+#'   `task_weights` to minimize maximum chunk runtime (makespan) when tasks
+#'   exhibit strong heterogeneity.
+#'
+#' @param n_tasks Positive integer total number of tasks.
+#' @param chunk_size Positive integer target tasks per chunk (sets total chunk
+#'   count `n_chunks = ceiling(n_tasks / chunk_size)`).
+#' @param strategy Chunking strategy: `"contiguous"`, `"round_robin"`, or
+#'   `"lpt"`.
+#' @param task_weights Optional positive numeric vector of length `n_tasks`
+#'   representing relative per-task cost or runtime (required for `"lpt"`).
+#'
+#' @return A [tibble::tibble()] with one row per chunk containing `chunk_id`,
+#'   `start_task`, `end_task`, `n_tasks`, `task_indices` (list-column), and
+#'   `estimated_weight`.
+#' @export
+#' @examples
+#' weights <- c(100, 90, 80, 10, 10, 10, 5, 5)
+#' plan_chunks(8L, chunk_size = 2L, strategy = "lpt", task_weights = weights)
+plan_chunks <- function(
+  n_tasks,
+  chunk_size,
+  strategy = c("contiguous", "round_robin", "lpt"),
+  task_weights = NULL
+) {
+  sp_partition_tasks(
+    n_tasks = n_tasks,
+    chunk_size = chunk_size,
+    strategy = strategy,
+    task_weights = task_weights
+  )
+}
+
+sp_partition_tasks <- function(
+  n_tasks,
+  chunk_size,
+  strategy = c("contiguous", "round_robin", "lpt"),
+  task_weights = NULL
+) {
   checkmate::assert_int(n_tasks, lower = 1L)
   checkmate::assert_int(chunk_size, lower = 1L)
+  strategy <- match.arg(strategy)
+
+  if (!is.null(task_weights)) {
+    checkmate::assert_numeric(task_weights, len = n_tasks, lower = 0, finite = TRUE, any.missing = FALSE)
+    weights <- pmax(as.numeric(task_weights), 1e-9)
+  } else {
+    if (strategy == "lpt") {
+      cli::cli_abort("{.arg task_weights} (length {n_tasks}) must be supplied when {.code strategy = 'lpt'}.")
+    }
+    weights <- rep(1, n_tasks)
+  }
+
+  chunk_size <- min(as.integer(chunk_size), as.integer(n_tasks))
   n_chunks <- as.integer(ceiling(n_tasks / chunk_size))
   chunk_ids <- seq_len(n_chunks)
-  starts <- (chunk_ids - 1L) * chunk_size + 1L
-  ends <- pmin(chunk_ids * chunk_size, n_tasks)
-  task_lists <- Map(seq.int, starts, ends)
+
+  if (strategy == "contiguous") {
+    starts <- (chunk_ids - 1L) * chunk_size + 1L
+    ends <- pmin(chunk_ids * chunk_size, n_tasks)
+    task_lists <- Map(seq.int, starts, ends)
+    chunk_w <- vapply(task_lists, function(idx) sum(weights[idx]), numeric(1L))
+  } else if (strategy == "round_robin") {
+    buckets <- vector("list", n_chunks)
+    for (c_i in chunk_ids) buckets[[c_i]] <- integer(0L)
+    for (tid in seq_len(n_tasks)) {
+      b <- ((tid - 1L) %% n_chunks) + 1L
+      buckets[[b]] <- c(buckets[[b]], as.integer(tid))
+    }
+    task_lists <- buckets
+    starts <- vapply(task_lists, min, integer(1L))
+    ends <- vapply(task_lists, max, integer(1L))
+    chunk_w <- vapply(task_lists, function(idx) sum(weights[idx]), numeric(1L))
+  } else {
+    # LPT (Longest Processing Time first) greedy makespan minimization
+    ord <- order(weights, decreasing = TRUE)
+    buckets <- vector("list", n_chunks)
+    for (c_i in chunk_ids) buckets[[c_i]] <- integer(0L)
+    loads <- numeric(n_chunks)
+    counts <- integer(n_chunks)
+
+    for (tid in ord) {
+      # Pick minimum-load chunk (tie-break by count, then chunk_id)
+      best <- order(loads, counts, chunk_ids)[[1L]]
+      buckets[[best]] <- c(buckets[[best]], as.integer(tid))
+      loads[[best]] <- loads[[best]] + weights[[tid]]
+      counts[[best]] <- counts[[best]] + 1L
+    }
+    task_lists <- lapply(buckets, sort)
+    starts <- vapply(task_lists, min, integer(1L))
+    ends <- vapply(task_lists, max, integer(1L))
+    chunk_w <- loads
+  }
+
   tibble::tibble(
     chunk_id = chunk_ids,
     start_task = as.integer(starts),
     end_task = as.integer(ends),
-    n_tasks = as.integer(ends - starts + 1L),
-    task_indices = task_lists
+    n_tasks = as.integer(lengths(task_lists)),
+    task_indices = task_lists,
+    estimated_weight = as.numeric(chunk_w)
   )
 }
 
@@ -435,6 +564,8 @@ sp_normalize_slurm_state <- function(state) {
     "OUT_OF_MEMORY" = "OUT_OF_MEMORY",
     "TO" = "TIMEOUT",
     "TIMEOUT" = "TIMEOUT",
+    "DL" = "TIMEOUT",
+    "DEADLINE" = "TIMEOUT",
     "CA" = "CANCELLED",
     "CANCELLED" = "CANCELLED",
     "PR" = "FAILED",

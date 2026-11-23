@@ -54,6 +54,24 @@ polled via \code{\link[shiny:reactiveTimer]{shiny::reactiveTimer()}} so the Shin
 responsive, estimates optimal SLURM flags via \code{\link[=estimate_resources]{estimate_resources()}}, and
 submits jobs to \code{backend} via \code{\link[=slurm_submit]{slurm_submit()}}.
 }
+\examples{
+\donttest{
+if (interactive() && requireNamespace("shiny", quietly = TRUE) &&
+    requireNamespace("bslib", quietly = TRUE)) {
+  ui <- bslib::page_fluid(mod_hpc_submit_ui("sub"))
+  server <- function(input, output, session) {
+    be <- mock_slurm_backend(max_workers = 2L)
+    mod_hpc_submit_server(
+      "sub",
+      backend = be,
+      fun = function(x) x^2,
+      args_builder = function(n) as.list(seq_len(n))
+    )
+  }
+  shiny::shinyApp(ui, server)
+}
+}
+}
 \seealso{
 \code{\link[=mod_hpc_submit_ui]{mod_hpc_submit_ui()}}, \code{\link[=mod_hpc_monitor_server]{mod_hpc_monitor_server()}}
 }

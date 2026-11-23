@@ -17,6 +17,8 @@ slurm_autopilot(
   mem_safety = 1.35,
   time_safety = 1.5,
   cpus_per_task = 1L,
+  strategy = c("contiguous", "round_robin", "lpt"),
+  task_weights = NULL,
   name = NULL,
   packages = character(),
   globals = list(),
@@ -66,6 +68,16 @@ walltime. Default \code{1.50}.}
 
 \item{cpus_per_task}{Integer number of CPU threads exposed to each pilot
 trial (\code{OMP_NUM_THREADS} / \code{OPENBLAS_NUM_THREADS}). Default \code{1L}.}
+
+\item{strategy}{Chunk assignment strategy: \code{"contiguous"} (default),
+\code{"round_robin"}, or \code{"lpt"} (Longest Processing Time first load balancing
+for heterogeneous task workloads).}
+
+\item{task_weights}{Optional positive numeric vector of length \code{n_tasks}
+providing relative per-task runtime/cost weights for \code{"lpt"} load
+balancing. When \code{strategy = "lpt"} and \code{task_weights = NULL}, weights are
+interpolated linearly from the pilot trials across \code{1:n_tasks} (or fall
+back to uniform weights if fewer than 2 distinct pilot indices exist).}
 
 \item{name}{Optional job name.}
 
@@ -131,4 +143,5 @@ run <- slurm_autopilot(
   simplify = TRUE
 )
 run$results
+unlink(backend$root_dir, recursive = TRUE)
 }

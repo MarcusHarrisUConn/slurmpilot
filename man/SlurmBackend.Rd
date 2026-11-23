@@ -9,6 +9,10 @@ Defines the pluggable R6 interface implemented by \link{MockSlurmBackend} and
 cloud batch APIs) can subclass \code{SlurmBackend} and override \code{submit()},
 \code{status()}, \code{retry()}, \code{cancel()}, \code{logs()}, and \code{collect()}.
 }
+\examples{
+be <- SlurmBackend$new()
+print(be)
+}
 \section{Public fields}{
   \if{html}{\out{<div class="r6-fields">}}
   \describe{

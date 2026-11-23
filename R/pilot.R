@@ -310,7 +310,13 @@ pilot_run <- function(
 
   tmp_dir <- tempfile("slurmpilot_pilot_")
   dir.create(tmp_dir, recursive = TRUE, showWarnings = FALSE)
-  on.exit(unlink(tmp_dir, recursive = TRUE, force = TRUE), add = TRUE)
+  live_procs <- list()
+  on.exit({
+    for (lp in live_procs) {
+      if (!is.null(lp)) sp_kill_and_reap(lp)
+    }
+    unlink(tmp_dir, recursive = TRUE, force = TRUE)
+  }, add = TRUE)
 
   rows <- vector("list", length(selected_idx))
 
@@ -342,8 +348,9 @@ pilot_run <- function(
       proc <- callr::r_bg(
         func = sp_pilot_child_runner,
         args = list(payload_path = payload_path),
-        supervise = TRUE
+        supervise = FALSE
       )
+      live_procs[[k]] <- proc
 
       rss_samples <- numeric(0L)
       timed_out <- FALSE
@@ -364,6 +371,7 @@ pilot_run <- function(
       if (!timed_out) {
         try(proc$wait(timeout = 500L), silent = TRUE)
       }
+      live_procs[[k]] <- NULL
 
       wall_sec <- max(0, proc.time()[["elapsed"]] - t_spawn_mono)
 
@@ -574,6 +582,14 @@ summary.slurmpilot_pilot <- function(object, ...) {
 #' @return Invisibly returns `x` for `engine = "base"`, or a `ggplot` object
 #'   for `engine = "ggplot2"`.
 #' @export
+#' @examples
+#' pilot <- pilot_run(
+#'   fun = function(x) mean(rnorm(x)),
+#'   args_list = list(100, 100),
+#'   n_pilot = 2L,
+#'   isolate = FALSE
+#' )
+#' plot(pilot, engine = "base")
 plot.slurmpilot_pilot <- function(x, engine = c("base", "ggplot2"), ...) {
   engine <- match.arg(engine)
   trials <- x$trials

@@ -45,4 +45,5 @@ Convenience constructor wrapping \link{MockSlurmBackend}\verb{$new(...)}.
 \examples{
 backend <- mock_slurm_backend(max_workers = 2L)
 print(backend)
+unlink(backend$root_dir, recursive = TRUE)
 }

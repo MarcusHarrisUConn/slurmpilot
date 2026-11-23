@@ -12,6 +12,11 @@ simulated \code{FAILED} / \code{OUT_OF_MEMORY} / \code{TIMEOUT} / \code{CANCELLE
 surgical retry of failed chunks, cancellation, log inspection, and ordered
 result collection — enabling 100\% offline development and testing on a laptop.
 }
+\examples{
+be <- MockSlurmBackend$new(max_workers = 2L)
+print(be)
+unlink(be$root_dir, recursive = TRUE)
+}
 \section{Super class}{
 \code{\link[slurmpilot:SlurmBackend]{SlurmBackend}} -> \code{MockSlurmBackend}
 }

@@ -24,3 +24,10 @@ non-blocking background \link{MockSlurmBackend} cluster execution, surgical chun
 retry, live UI responsiveness during heavy compute, and Apptainer/SLURM
 script export.
 }
+\examples{
+\donttest{
+if (interactive()) {
+  run_demo_app()
+}
+}
+}

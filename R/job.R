@@ -9,7 +9,18 @@ new_slurmpilot_job <- function(
   remote_dir = NULL,
   scheduler_ids = character(),
   spec = NULL,
-  meta = list()
+  meta = list(),
+  retry_history = tibble::tibble(
+    retry_round = integer(),
+    timestamp = character(),
+    chunk_id = integer(),
+    trigger_state = character(),
+    old_mem_mb = integer(),
+    new_mem_mb = integer(),
+    old_time_sec = integer(),
+    new_time_sec = integer(),
+    adaptive = logical()
+  )
 ) {
   structure(
     list(
@@ -22,6 +33,7 @@ new_slurmpilot_job <- function(
       scheduler_ids = scheduler_ids,
       spec = spec,
       submitted_at = sp_timestamp(),
+      retry_history = retry_history,
       meta = meta
     ),
     class = "slurmpilot_job"
@@ -48,9 +60,12 @@ new_slurmpilot_job <- function(
 #' @param container_sif Optional path to Apptainer `.sif` image.
 #' @param modules Optional character vector of HPC modules to load.
 #' @param env_vars Optional named list/vector of extra environment variables.
+#' @param warn_bundle_mb Optional numeric size threshold in MB (default `50`);
+#'   emits a diagnostic warning if the serialized payload (`fun`, closure,
+#'   `args_list`, `globals`) exceeds this threshold. Set `Inf` to disable.
 #'
 #' @return An S3 object of class `"slurmpilot_job_spec"`.
-#' @seealso [slurm_submit()], [estimate_resources()]
+#' @seealso [slurm_submit()], [estimate_resources()], [inspect_job_globals()]
 #' @export
 #' @examples
 #' spec <- slurm_job_spec(
@@ -71,7 +86,8 @@ slurm_job_spec <- function(
   continue_on_error = FALSE,
   container_sif = NULL,
   modules = character(),
-  env_vars = list()
+  env_vars = list(),
+  warn_bundle_mb = 50
 ) {
   checkmate::assert_function(fun)
   if (!is.list(args_list)) {
@@ -118,6 +134,23 @@ slurm_job_spec <- function(
     }
   }
 
+  if (is.finite(warn_bundle_mb)) {
+    checkmate::assert_number(warn_bundle_mb, lower = 0.001, finite = TRUE)
+    diag_rep <- inspect_job_globals(
+      fun = fun,
+      args_list = args_list,
+      globals = globals,
+      packages = packages,
+      size_warn_mb = warn_bundle_mb
+    )
+    if (diag_rep$estimated_bundle_mb >= warn_bundle_mb) {
+      cli::cli_warn(c(
+        "Job {.val {sp_sanitize_name(name, default = 'slurmpilot_job')}} has an estimated staged payload of {sprintf('%.1f MB', diag_rep$estimated_bundle_mb)} (threshold {warn_bundle_mb} MB).",
+        "i" = "Run {.code inspect_job_globals()} to inspect large captured closure objects or globals."
+      ))
+    }
+  }
+
   structure(
     list(
       name = sp_sanitize_name(name, default = "slurmpilot_job"),
@@ -158,6 +191,13 @@ slurm_job_spec <- function(
 #' @return A `slurmpilot_job` handle.
 #' @seealso [slurm_status()], [slurm_wait()], [slurm_retry()], [slurm_collect()]
 #' @export
+#' @examples
+#' be <- mock_slurm_backend(max_workers = 1L)
+#' job <- slurm_submit(be, function(x) x + 1, as.list(1:4),
+#'                     resources = resource_spec(4L, chunk_size = 2L))
+#' st <- slurm_wait(job, poll_interval = 0.05)
+#' slurm_collect(job, simplify = TRUE)
+#' unlink(be$root_dir, recursive = TRUE)
 slurm_submit <- function(
   backend,
   fun,
@@ -192,6 +232,12 @@ slurm_submit <- function(
 #' @return A `slurmpilot_status` object with aggregate job state and a per-chunk
 #'   telemetry tibble (`$chunks`).
 #' @export
+#' @examples
+#' be <- mock_slurm_backend(max_workers = 1L)
+#' job <- slurm_submit(be, function(x) x * 2, as.list(1:2))
+#' st <- slurm_wait(job, poll_interval = 0.05)
+#' slurm_status(job)$state
+#' unlink(be$root_dir, recursive = TRUE)
 slurm_status <- function(job) {
   checkmate::assert_class(job, "slurmpilot_job")
   job$backend$status(job)
@@ -200,37 +246,207 @@ slurm_status <- function(job) {
 #' Surgically Retry Failed, OOM, Timed-Out, or Cancelled Chunks
 #'
 #' Resubmits only unsuccessful array chunks while preserving already-completed
-#' chunk checkpoints on disk. Optionally scales `--mem` and/or `--time` via
-#' [scale_resources()] before resubmitting.
+#' chunk checkpoints on disk. Supports **adaptive resource escalation**: when
+#' `adaptive = TRUE` (default), chunks that failed with `OUT_OF_MEMORY`
+#' automatically scale `--mem` by `auto_mem_multiplier` (capped at `max_mem_mb`)
+#' and chunks that failed with `TIMEOUT` automatically scale `--time` by
+#' `auto_time_multiplier` (capped at `max_time_minutes`). Records per-chunk
+#' retry provenance accessible via [slurm_retry_history()].
 #'
 #' @param job A `slurmpilot_job` handle.
 #' @param chunks Optional integer vector of chunk IDs to retry. Defaults to all
 #'   chunks currently in `FAILED`, `OUT_OF_MEMORY`, `TIMEOUT`, or `CANCELLED`.
-#' @param mem_multiplier Optional numeric multiplier to bump `--mem` on retry
-#'   (e.g., `1.5` after an `OUT_OF_MEMORY` failure).
-#' @param time_multiplier Optional numeric multiplier to bump `--time` on retry
-#'   (e.g., `1.5` after a `TIMEOUT`).
+#' @param mem_multiplier Optional explicit numeric multiplier to bump `--mem` on
+#'   retry (overrides adaptive OOM scaling when supplied).
+#' @param time_multiplier Optional explicit numeric multiplier to bump `--time`
+#'   on retry (overrides adaptive TIMEOUT scaling when supplied).
 #' @param resources Optional explicit replacement `slurmpilot_resources` object
-#'   (takes precedence over multipliers).
+#'   (takes precedence over multipliers and adaptive escalation).
+#' @param adaptive Logical; if `TRUE` (default), automatically escalates `--mem`
+#'   for `OUT_OF_MEMORY` failures and `--time` for `TIMEOUT` failures.
+#' @param auto_mem_multiplier Adaptive `--mem` escalation factor for
+#'   `OUT_OF_MEMORY` chunks. Default `1.5`.
+#' @param auto_time_multiplier Adaptive `--time` escalation factor for `TIMEOUT`
+#'   chunks. Default `1.5`.
+#' @param max_mem_mb Maximum memory ceiling in MB for adaptive escalation.
+#'   Default `524288L` (512 GiB).
+#' @param max_time_minutes Maximum walltime ceiling in minutes for adaptive
+#'   escalation. Default `10080` (7 days).
 #'
-#' @return Updated `slurmpilot_job` handle.
+#' @return Updated `slurmpilot_job` handle with appended `$retry_history`
+#'   provenance.
+#' @seealso [slurm_retry_history()], [scale_resources()]
 #' @export
+#' @examples
+#' be <- mock_slurm_backend(max_workers = 1L)
+#' job <- slurm_submit(
+#'   be, function(x) x^2, as.list(1:4),
+#'   resources = resource_spec(4L, chunk_size = 2L, mem_mb = 512L),
+#'   fault_injection = list(oom_chunks = 2L, fail_once = TRUE)
+#' )
+#' slurm_wait(job, poll_interval = 0.05)
+#' job <- slurm_retry(job)
+#' slurm_wait(job, poll_interval = 0.05)
+#' slurm_retry_history(job)
+#' unlink(be$root_dir, recursive = TRUE)
 slurm_retry <- function(
   job,
   chunks = NULL,
   mem_multiplier = NULL,
   time_multiplier = NULL,
-  resources = NULL
+  resources = NULL,
+  adaptive = TRUE,
+  auto_mem_multiplier = 1.5,
+  auto_time_multiplier = 1.5,
+  max_mem_mb = 524288L,
+  max_time_minutes = 10080
 ) {
   checkmate::assert_class(job, "slurmpilot_job")
-  if (is.null(resources) && (!is.null(mem_multiplier) || !is.null(time_multiplier))) {
-    resources <- scale_resources(
-      job$resources,
-      mem_multiplier = mem_multiplier %||% 1,
-      time_multiplier = time_multiplier %||% 1
+  checkmate::assert_flag(adaptive)
+  checkmate::assert_number(auto_mem_multiplier, lower = 1.0, upper = 10.0)
+  checkmate::assert_number(auto_time_multiplier, lower = 1.0, upper = 10.0)
+  checkmate::assert_number(max_mem_mb, lower = 64, finite = TRUE)
+  checkmate::assert_number(max_time_minutes, lower = 1, finite = TRUE)
+
+  old_res <- job$resources
+  st_before <- slurm_status(job)
+  target_chunks <- if (is.null(chunks)) {
+    st_before$chunks$chunk_id[st_before$chunks$state %in% sp_retryable_states()]
+  } else {
+    checkmate::assert_integerish(chunks, lower = 1L, upper = old_res$n_chunks, min.len = 1L)
+    sort(unique(as.integer(chunks)))
+  }
+
+  if (length(target_chunks) == 0L) {
+    cli::cli_inform("Job {job$job_id}: no retryable chunks found.")
+    return(job)
+  }
+
+  target_rows <- st_before$chunks[st_before$chunks$chunk_id %in% target_chunks, , drop = FALSE]
+  trigger_states <- target_rows$state
+  used_adaptive <- FALSE
+
+  eff_mem_mult <- mem_multiplier
+  eff_time_mult <- time_multiplier
+
+  if (is.null(resources) && isTRUE(adaptive)) {
+    if (is.null(eff_mem_mult) && any(trigger_states == "OUT_OF_MEMORY")) {
+      eff_mem_mult <- auto_mem_multiplier
+      used_adaptive <- TRUE
+    }
+    if (is.null(eff_time_mult) && any(trigger_states == "TIMEOUT")) {
+      eff_time_mult <- auto_time_multiplier
+      used_adaptive <- TRUE
+    }
+  }
+
+  if (is.null(resources) && (!is.null(eff_mem_mult) || !is.null(eff_time_mult))) {
+    cand_res <- scale_resources(
+      old_res,
+      mem_multiplier = eff_mem_mult %||% 1,
+      time_multiplier = eff_time_mult %||% 1
+    )
+    # Enforce hard safety ceilings on escalated resources
+    if (cand_res$mem_mb > max_mem_mb || (cand_res$time_sec / 60) > max_time_minutes) {
+      capped_mem <- min(cand_res$mem_mb, as.integer(floor(max_mem_mb)))
+      capped_time_min <- min(cand_res$time_sec / 60, max_time_minutes)
+      cand_res <- resource_spec(
+        n_tasks = old_res$n_tasks,
+        chunk_size = old_res$chunk_size,
+        mem_mb = capped_mem,
+        time_minutes = capped_time_min,
+        cpus_per_task = old_res$cpus_per_task,
+        partition = old_res$partition,
+        account = old_res$account,
+        qos = old_res$qos,
+        max_concurrent = old_res$max_concurrent
+      )
+      cand_res$chunks <- old_res$chunks
+      cand_res$strategy <- old_res$strategy %||% "contiguous"
+      cand_res$estimates <- old_res$estimates
+      cand_res$assumptions <- old_res$assumptions
+    }
+    resources <- cand_res
+  }
+
+  prev_hist <- job$retry_history
+  if (is.null(prev_hist) || !is.data.frame(prev_hist)) {
+    prev_hist <- tibble::tibble(
+      retry_round = integer(),
+      timestamp = character(),
+      chunk_id = integer(),
+      trigger_state = character(),
+      old_mem_mb = integer(),
+      new_mem_mb = integer(),
+      old_time_sec = integer(),
+      new_time_sec = integer(),
+      adaptive = logical()
     )
   }
-  job$backend$retry(job, chunks = chunks, resources = resources)
+
+  job_out <- job$backend$retry(job, chunks = target_chunks, resources = resources)
+  new_res <- job_out$resources
+  next_round <- if (nrow(prev_hist) > 0L) max(prev_hist$retry_round) + 1L else 1L
+  ts_now <- sp_timestamp()
+
+  state_lookup <- stats::setNames(target_rows$state, as.character(target_rows$chunk_id))
+  new_rows <- tibble::tibble(
+    retry_round = rep(as.integer(next_round), length(target_chunks)),
+    timestamp = rep(ts_now, length(target_chunks)),
+    chunk_id = as.integer(target_chunks),
+    trigger_state = unname(as.character(state_lookup[as.character(target_chunks)])),
+    old_mem_mb = rep(as.integer(old_res$mem_mb), length(target_chunks)),
+    new_mem_mb = rep(as.integer(new_res$mem_mb), length(target_chunks)),
+    old_time_sec = rep(as.integer(old_res$time_sec), length(target_chunks)),
+    new_time_sec = rep(as.integer(new_res$time_sec), length(target_chunks)),
+    adaptive = rep(isTRUE(used_adaptive), length(target_chunks))
+  )
+
+  job_out$retry_history <- rbind(prev_hist, new_rows)
+  if (!is.null(job_out$local_dir) && dir.exists(job_out$local_dir)) {
+    try(
+      sp_write_json_atomic(job_out$retry_history, file.path(job_out$local_dir, "retry_history.json")),
+      silent = TRUE
+    )
+  }
+  job_out
+}
+
+#' Retrieve Per-Chunk Surgical Retry Provenance for a Job
+#'
+#' Returns a tidy tibble recording every surgical retry round executed via
+#' [slurm_retry()], including chunk IDs, triggering failure states, memory and
+#' walltime escalation transitions, and timestamps.
+#'
+#' @param job A `slurmpilot_job` handle.
+#'
+#' @return A [tibble::tibble()] with columns `retry_round`, `timestamp`,
+#'   `chunk_id`, `trigger_state`, `old_mem_mb`, `new_mem_mb`, `old_time_sec`,
+#'   `new_time_sec`, and `adaptive`.
+#' @seealso [slurm_retry()]
+#' @export
+#' @examples
+#' be <- mock_slurm_backend(max_workers = 1L)
+#' job <- slurm_submit(be, function(x) x, as.list(1:2))
+#' slurm_wait(job, poll_interval = 0.05)
+#' slurm_retry_history(job)
+#' unlink(be$root_dir, recursive = TRUE)
+slurm_retry_history <- function(job) {
+  checkmate::assert_class(job, "slurmpilot_job")
+  if (!is.null(job$retry_history) && is.data.frame(job$retry_history)) {
+    return(tibble::as_tibble(job$retry_history))
+  }
+  tibble::tibble(
+    retry_round = integer(),
+    timestamp = character(),
+    chunk_id = integer(),
+    trigger_state = character(),
+    old_mem_mb = integer(),
+    new_mem_mb = integer(),
+    old_time_sec = integer(),
+    new_time_sec = integer(),
+    adaptive = logical()
+  )
 }
 
 #' Cancel Active Chunks of a Submitted Job
@@ -240,6 +456,12 @@ slurm_retry <- function(
 #'   pending/running chunks).
 #' @return Latest `slurmpilot_status` invisibly.
 #' @export
+#' @examples
+#' be <- mock_slurm_backend(max_workers = 1L, queue_delay = 0.2)
+#' job <- slurm_submit(be, function(x) { Sys.sleep(2); x }, as.list(1:2))
+#' st <- slurm_cancel(job)
+#' st$state
+#' unlink(be$root_dir, recursive = TRUE)
 slurm_cancel <- function(job, chunks = NULL) {
   checkmate::assert_class(job, "slurmpilot_job")
   job$backend$cancel(job, chunks = chunks)
@@ -252,6 +474,13 @@ slurm_cancel <- function(job, chunks = NULL) {
 #'   chunks).
 #' @return Named list of chunk log records (`chunk_id`, `stdout`, `stderr`).
 #' @export
+#' @examples
+#' be <- mock_slurm_backend(max_workers = 1L)
+#' job <- slurm_submit(be, function(x) x + 1, as.list(1:2),
+#'                     resources = resource_spec(2L, chunk_size = 2L))
+#' slurm_wait(job, poll_interval = 0.05)
+#' slurm_logs(job, chunk_id = 1L)$chunk_1$stdout
+#' unlink(be$root_dir, recursive = TRUE)
 slurm_logs <- function(job, chunk_id = NULL) {
   checkmate::assert_class(job, "slurmpilot_job")
   job$backend$logs(job, chunk_id = chunk_id)
@@ -266,6 +495,13 @@ slurm_logs <- function(job, chunk_id = NULL) {
 #'   some chunks are incomplete. Default `FALSE`.
 #' @return Ordered list (or simplified vector/tibble) of task results.
 #' @export
+#' @examples
+#' be <- mock_slurm_backend(max_workers = 1L)
+#' job <- slurm_submit(be, function(x) x * 10, as.list(1:3),
+#'                     resources = resource_spec(3L, chunk_size = 3L))
+#' slurm_wait(job, poll_interval = 0.05)
+#' slurm_collect(job, simplify = TRUE)
+#' unlink(be$root_dir, recursive = TRUE)
 slurm_collect <- function(job, simplify = FALSE, allow_partial = FALSE) {
   checkmate::assert_class(job, "slurmpilot_job")
   job$backend$collect(job, simplify = simplify, allow_partial = allow_partial)
@@ -280,6 +516,13 @@ slurm_collect <- function(job, simplify = FALSE, allow_partial = FALSE) {
 #'   Default `FALSE`.
 #' @return A `slurmpilot_status` object.
 #' @export
+#' @examples
+#' be <- mock_slurm_backend(max_workers = 1L)
+#' job <- slurm_submit(be, function(x) x + 1, as.list(1:2),
+#'                     resources = resource_spec(2L, chunk_size = 2L))
+#' st <- slurm_wait(job, poll_interval = 0.05)
+#' st$state
+#' unlink(be$root_dir, recursive = TRUE)
 slurm_wait <- function(job, timeout = Inf, poll_interval = 0.2, progress = FALSE) {
   checkmate::assert_class(job, "slurmpilot_job")
   job$backend$wait(job, timeout = timeout, poll_interval = poll_interval, progress = progress)
@@ -328,6 +571,7 @@ slurm_wait <- function(job, timeout = Inf, poll_interval = 0.2, progress = FALSE
 #'   simplify = TRUE
 #' )
 #' run$results
+#' unlink(backend$root_dir, recursive = TRUE)
 slurm_autopilot <- function(
   fun,
   args_list,
@@ -341,6 +585,8 @@ slurm_autopilot <- function(
   mem_safety = 1.35,
   time_safety = 1.50,
   cpus_per_task = 1L,
+  strategy = c("contiguous", "round_robin", "lpt"),
+  task_weights = NULL,
   name = NULL,
   packages = character(),
   globals = list(),
@@ -358,6 +604,7 @@ slurm_autopilot <- function(
   checkmate::assert_class(backend, "SlurmBackend")
   checkmate::assert_int(auto_retry, lower = 0L)
   sample_method <- match.arg(sample_method)
+  strategy <- match.arg(strategy)
 
   pilot <- pilot_run(
     fun = fun,
@@ -381,7 +628,9 @@ slurm_autopilot <- function(
     max_chunk_size = max_chunk_size,
     mem_safety = mem_safety,
     time_safety = time_safety,
-    cpus_per_task = cpus_per_task
+    cpus_per_task = cpus_per_task,
+    strategy = strategy,
+    task_weights = task_weights
   )
 
   job <- slurm_submit(
@@ -404,14 +653,17 @@ slurm_autopilot <- function(
     retries_left <- auto_retry
 
     while (retries_left > 0L && st$state %in% c("PARTIAL_FAILURE", "FAILED") && st$n_retryable > 0L) {
-      mem_mult <- if (st$n_oom > 0L) retry_mem_multiplier else 1
-      time_mult <- if (st$n_timeout > 0L) retry_time_multiplier else 1
       if (progress) {
         cli::cli_inform(
-          "Auto-retrying {st$n_retryable} failed chunk{?s} (mem x{mem_mult}, time x{time_mult})..."
+          "Auto-retrying {st$n_retryable} failed chunk{?s} (adaptive mem x{retry_mem_multiplier}, time x{retry_time_multiplier})..."
         )
       }
-      job <- slurm_retry(job, mem_multiplier = mem_mult, time_multiplier = time_mult)
+      job <- slurm_retry(
+        job,
+        adaptive = TRUE,
+        auto_mem_multiplier = retry_mem_multiplier,
+        auto_time_multiplier = retry_time_multiplier
+      )
       st <- slurm_wait(job, poll_interval = poll_interval, progress = progress)
       retries_left <- retries_left - 1L
     }

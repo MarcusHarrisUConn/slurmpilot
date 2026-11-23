@@ -253,6 +253,9 @@ sp_collect_checkpoints <- function(
 #' `status()`, `retry()`, `cancel()`, `logs()`, and `collect()`.
 #'
 #' @export
+#' @examples
+#' be <- SlurmBackend$new()
+#' print(be)
 SlurmBackend <- R6::R6Class(
   classname = "SlurmBackend",
   public = list(

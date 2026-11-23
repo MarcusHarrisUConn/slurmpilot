@@ -32,4 +32,5 @@ tmp <- tempfile(fileext = ".rds")
 saveRDS(list(chunk_id = 1L, results = list()), tmp)
 writeLines(digest::digest(tmp, algo = "sha256", file = TRUE), paste0(tmp, ".sha256"))
 verify_checkpoint(tmp)$ok
+unlink(c(tmp, paste0(tmp, ".sha256")))
 }

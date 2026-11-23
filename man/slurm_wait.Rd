@@ -22,3 +22,11 @@ A \code{slurmpilot_status} object.
 \description{
 Wait for a Job to Reach a Terminal State
 }
+\examples{
+be <- mock_slurm_backend(max_workers = 1L)
+job <- slurm_submit(be, function(x) x + 1, as.list(1:2),
+                    resources = resource_spec(2L, chunk_size = 2L))
+st <- slurm_wait(job, poll_interval = 0.05)
+st$state
+unlink(be$root_dir, recursive = TRUE)
+}

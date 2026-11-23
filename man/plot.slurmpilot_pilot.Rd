@@ -22,3 +22,12 @@ for \code{engine = "ggplot2"}.
 Visualizes per-trial execution time, startup overhead, and peak RSS memory
 from a \code{\link[=pilot_run]{pilot_run()}} result.
 }
+\examples{
+pilot <- pilot_run(
+  fun = function(x) mean(rnorm(x)),
+  args_list = list(100, 100),
+  n_pilot = 2L,
+  isolate = FALSE
+)
+plot(pilot, engine = "base")
+}

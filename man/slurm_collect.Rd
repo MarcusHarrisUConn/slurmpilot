@@ -21,3 +21,11 @@ Ordered list (or simplified vector/tibble) of task results.
 \description{
 Collect Ordered Task Results from a Completed Job
 }
+\examples{
+be <- mock_slurm_backend(max_workers = 1L)
+job <- slurm_submit(be, function(x) x * 10, as.list(1:3),
+                    resources = resource_spec(3L, chunk_size = 3L))
+slurm_wait(job, poll_interval = 0.05)
+slurm_collect(job, simplify = TRUE)
+unlink(be$root_dir, recursive = TRUE)
+}

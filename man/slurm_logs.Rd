@@ -18,3 +18,11 @@ Named list of chunk log records (\code{chunk_id}, \code{stdout}, \code{stderr}).
 \description{
 Retrieve Stdout and Stderr Logs for a Submitted Job
 }
+\examples{
+be <- mock_slurm_backend(max_workers = 1L)
+job <- slurm_submit(be, function(x) x + 1, as.list(1:2),
+                    resources = resource_spec(2L, chunk_size = 2L))
+slurm_wait(job, poll_interval = 0.05)
+slurm_logs(job, chunk_id = 1L)$chunk_1$stdout
+unlink(be$root_dir, recursive = TRUE)
+}

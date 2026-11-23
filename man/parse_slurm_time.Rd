@@ -10,13 +10,14 @@ parse_slurm_time(x)
 \item{x}{Character vector of SLURM time strings.}
 }
 \value{
-Numeric vector of durations in seconds (\code{NA_real_} for unparseable
-or missing inputs).
+Numeric vector of durations in seconds (\code{NA_real_} for unparseable,
+\code{"UNLIMITED"}, \code{"INVALID"}, or missing inputs).
 }
 \description{
-Parses SLURM elapsed/limit time strings such as \code{"MM:SS"}, \code{"HH:MM:SS"}, or
-\code{"D-HH:MM:SS"} into numeric seconds.
+Parses SLURM elapsed/limit time strings such as \code{"MM"}, \code{"MM:SS"},
+\code{"HH:MM:SS"}, \code{"D-HH"}, \code{"D-HH:MM"}, or \code{"D-HH:MM:SS"} (with optional
+fractional seconds) into numeric seconds.
 }
 \examples{
-parse_slurm_time(c("05:30", "01:15:00", "2-03:00:00"))
+parse_slurm_time(c("05:30", "01:15:00", "2-03:00:10", "00:02:15.500"))
 }

@@ -24,3 +24,8 @@ Character vector of SLURM flags (e.g. \code{c("--array=1-10", "--mem=2G", ...)})
 Formats a \code{slurmpilot_resources} object into canonical SLURM \code{--flag=value}
 directives suitable for \code{sbatch} headers or command-line submission.
 }
+\examples{
+res <- resource_spec(n_tasks = 20, chunk_size = 5, mem_mb = 2048, time_minutes = 30)
+as_slurm_flags(res)
+as_slurm_flags(res, array_indices = c(2L, 4L))
+}

@@ -18,3 +18,10 @@ Latest \code{slurmpilot_status} invisibly.
 \description{
 Cancel Active Chunks of a Submitted Job
 }
+\examples{
+be <- mock_slurm_backend(max_workers = 1L, queue_delay = 0.2)
+job <- slurm_submit(be, function(x) { Sys.sleep(2); x }, as.list(1:2))
+st <- slurm_cancel(job)
+st$state
+unlink(be$root_dir, recursive = TRUE)
+}

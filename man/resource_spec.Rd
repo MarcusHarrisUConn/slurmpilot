@@ -13,7 +13,9 @@ resource_spec(
   partition = NULL,
   account = NULL,
   qos = NULL,
-  max_concurrent = NULL
+  max_concurrent = NULL,
+  strategy = c("contiguous", "round_robin", "lpt"),
+  task_weights = NULL
 )
 }
 \arguments{
@@ -36,6 +38,12 @@ Default \code{15}.}
 \item{qos}{Optional SLURM \code{--qos}.}
 
 \item{max_concurrent}{Optional positive integer array concurrency cap.}
+
+\item{strategy}{Chunk assignment strategy: \code{"contiguous"} (default),
+\code{"round_robin"}, or \code{"lpt"}.}
+
+\item{task_weights}{Optional positive numeric vector of length \code{n_tasks}
+required when \code{strategy = "lpt"}.}
 }
 \value{
 An S3 object of class \code{"slurmpilot_resources"}.
@@ -50,5 +58,5 @@ spec <- resource_spec(n_tasks = 100, chunk_size = 10, mem_mb = 2048, time_minute
 as_slurm_flags(spec)
 }
 \seealso{
-\code{\link[=estimate_resources]{estimate_resources()}}, \code{\link[=as_slurm_flags]{as_slurm_flags()}}
+\code{\link[=estimate_resources]{estimate_resources()}}, \code{\link[=plan_chunks]{plan_chunks()}}, \code{\link[=as_slurm_flags]{as_slurm_flags()}}
 }

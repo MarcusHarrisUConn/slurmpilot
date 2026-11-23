@@ -29,6 +29,12 @@ sp_check_shiny_deps <- function() {
 #' @return A `bslib` card UI element.
 #' @seealso [mod_hpc_submit_server()], [mod_hpc_monitor_ui()]
 #' @export
+#' @examples
+#' if (requireNamespace("shiny", quietly = TRUE) &&
+#'     requireNamespace("bslib", quietly = TRUE)) {
+#'   ui <- mod_hpc_submit_ui("hpc_sub", default_n_tasks = 12L)
+#'   inherits(ui, "shiny.tag")
+#' }
 mod_hpc_submit_ui <- function(
   id,
   title = "HPC Micro-Pilot & Submission",
@@ -128,6 +134,23 @@ mod_hpc_submit_ui <- function(
 #'
 #' @seealso [mod_hpc_submit_ui()], [mod_hpc_monitor_server()]
 #' @export
+#' @examples
+#' \donttest{
+#' if (interactive() && requireNamespace("shiny", quietly = TRUE) &&
+#'     requireNamespace("bslib", quietly = TRUE)) {
+#'   ui <- bslib::page_fluid(mod_hpc_submit_ui("sub"))
+#'   server <- function(input, output, session) {
+#'     be <- mock_slurm_backend(max_workers = 2L)
+#'     mod_hpc_submit_server(
+#'       "sub",
+#'       backend = be,
+#'       fun = function(x) x^2,
+#'       args_builder = function(n) as.list(seq_len(n))
+#'     )
+#'   }
+#'   shiny::shinyApp(ui, server)
+#' }
+#' }
 mod_hpc_submit_server <- function(
   id,
   backend,
@@ -210,7 +233,7 @@ mod_hpc_submit_server <- function(
       pilot_state$proc <- callr::r_bg(
         func = sp_pilot_child_runner,
         args = list(payload_path = payload_path),
-        supervise = TRUE
+        supervise = FALSE
       )
       pilot_msg_rv(sprintf("Profiling micro-pilot trial %d / %d (task #%d)...", k, length(pilot_state$indices), task_idx))
     }

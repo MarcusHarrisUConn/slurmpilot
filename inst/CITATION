@@ -1,0 +1,8 @@
+bibentry(
+  bibtype  = "Manual",
+  title    = "slurmpilot: Auto-Profiling SLURM HPC Orchestration and Shiny Offloading",
+  author   = person("Marcus", "Harris", email = "marcus.harris.uconn@gmail.com"),
+  year     = "2026",
+  note     = paste("R package version", meta$Version),
+  url      = "https://github.com/MarcusHarrisUConn/slurmpilot"
+)

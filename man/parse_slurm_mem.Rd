@@ -13,9 +13,11 @@ parse_slurm_mem(x)
 Numeric vector in megabytes (\code{NA_real_} for empty/invalid values).
 }
 \description{
-Parses SLURM \code{MaxRSS} or \code{--mem} values (e.g., \code{"512K"}, \code{"2048M"}, \code{"4G"},
-\code{"1.5T"}, or raw byte strings) into numeric megabytes (MiB).
+Parses SLURM \code{MaxRSS}, \code{ReqMem}, or \code{--mem} values — including standard
+units (\code{"512K"}, \code{"2048M"}, \code{"4G"}, \code{"0.5T"}), IEC units (\code{"2GiB"}), and
+SLURM per-CPU / per-node \code{ReqMem} suffixes (\code{"100Mc"}, \code{"200Mn"}, \code{"4Gc"})
+— into numeric megabytes (MiB).
 }
 \examples{
-parse_slurm_mem(c("524288K", "1024M", "2G"))
+parse_slurm_mem(c("1024K", "2.5G", "0.5T", "100Mc", "200Mn"))
 }

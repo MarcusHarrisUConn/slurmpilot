@@ -44,6 +44,13 @@ non-blocking empirical micro-pilot, inspecting auto-sized SLURM resource
 recommendations (\code{--array}, \code{--mem}, \code{--time}, \code{--cpus-per-task}), and
 submitting array jobs to any \link{SlurmBackend}.
 }
+\examples{
+if (requireNamespace("shiny", quietly = TRUE) &&
+    requireNamespace("bslib", quietly = TRUE)) {
+  ui <- mod_hpc_submit_ui("hpc_sub", default_n_tasks = 12L)
+  inherits(ui, "shiny.tag")
+}
+}
 \seealso{
 \code{\link[=mod_hpc_submit_server]{mod_hpc_submit_server()}}, \code{\link[=mod_hpc_monitor_ui]{mod_hpc_monitor_ui()}}
 }

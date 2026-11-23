@@ -1,0 +1,112 @@
+url: https://marcusharrisphd.com/slurmpilot/
+
+template:
+  bootstrap: 5
+  bootswatch: flatly
+  bslib:
+    primary: "#264653"
+    secondary: "#6e7f8d"
+    base_font:
+      google: "Source Sans Pro"
+    heading_font:
+      google: "Source Serif 4"
+    code_font:
+      google: "JetBrains Mono"
+
+navbar:
+  structure:
+    left: [intro, reference, articles, pdfs, news]
+    right: [search, github]
+  components:
+    pdfs:
+      text: PDFs
+      menu:
+        - text: Reference Manual (PDF)
+          href: slurmpilot-manual.pdf
+        - text: HPC Field Guide (PDF)
+          href: slurmpilot-guide.pdf
+
+articles:
+  - title: Workflows & Guides
+    navbar: ~
+    contents:
+      - getting-started
+      - pilot-to-cluster
+      - apptainer-ssh-shiny
+      - troubleshooting-and-retries
+
+reference:
+  - title: Micro-Pilot Profiling & Resource Sizing
+    desc: Empirically profile OS RSS & runtime, size SLURM arrays, load-balance heterogeneous workloads, and audit closures.
+    contents:
+      - pilot_run
+      - plot.slurmpilot_pilot
+      - estimate_resources
+      - resource_spec
+      - scale_resources
+      - as_slurm_flags
+      - plan_chunks
+      - inspect_job_globals
+
+  - title: Job Lifecycle & Autopilot
+    desc: User-facing S3 workflow API for submitting, monitoring, retrying, cancelling, and collecting array jobs.
+    contents:
+      - slurm_autopilot
+      - slurm_job_spec
+      - slurm_submit
+      - slurm_status
+      - slurm_wait
+      - slurm_retry
+      - slurm_retry_history
+      - slurm_cancel
+      - slurm_logs
+      - slurm_collect
+
+  - title: Scheduler Backends
+    desc: Pluggable R6 scheduler interface with a local parallel mock SLURM simulator and production SSH/SLURM adapter.
+    contents:
+      - SlurmBackend
+      - MockSlurmBackend
+      - mock_slurm_backend
+      - SlurmSshBackend
+      - slurm_ssh_backend
+
+  - title: HPC Environment, Apptainer & Batch Scripts
+    desc: Scan dependencies, detect compiled toolchains, and emit reproducible Apptainer .def recipes, sbatch scripts, and standalone workers.
+    contents:
+      - scan_project_env
+      - toolchain_registry
+      - build_apptainer_def
+      - render_sbatch_script
+      - render_worker_script
+
+  - title: Non-Blocking Shiny Offload Modules
+    desc: Drop-in bslib/Shiny UI and server modules plus the bundled interactive Monte Carlo demo studio.
+    contents:
+      - mod_hpc_submit_ui
+      - mod_hpc_submit_server
+      - mod_hpc_monitor_ui
+      - mod_hpc_monitor_server
+      - run_demo_app
+
+  - title: Security, Reproducibility & SLURM Parsers
+    desc: Checkpoint SHA-256 verification, independent L'Ecuyer-CMRG parallel RNG streams, SSH/SCP builders, and SLURM output parsers.
+    contents:
+      - verify_checkpoint
+      - slurmpilot_rng_stream
+      - build_ssh_args
+      - build_scp_args
+      - build_scancel_command
+      - parse_sbatch_output
+      - parse_squeue_output
+      - parse_sacct_output
+      - format_slurm_time
+      - parse_slurm_time
+      - format_slurm_mem
+      - parse_slurm_mem
+      - format_slurm_array_indices
+      - parse_slurm_array_spec
+
+  - title: Package Overview
+    contents:
+      - slurmpilot-package

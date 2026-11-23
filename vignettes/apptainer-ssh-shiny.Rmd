@@ -1,0 +1,192 @@
+---
+title: "Apptainer Packaging, Remote SSH/SLURM & Non-Blocking Shiny Offloading"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Apptainer Packaging, Remote SSH/SLURM & Non-Blocking Shiny Offloading}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+## Overview
+
+Moving a validated workflow from `MockSlurmBackend` onto a university or cloud
+HPC cluster requires reproducible compiled containers, firewall-friendly SSH
+orchestration, and (for interactive dashboards) non-blocking Shiny modules.
+This vignette walks through each piece end-to-end.
+
+## 1. Scanning Project Environments & Compiled Toolchains
+
+`scan_project_env()` inspects `renv.lock`, `DESCRIPTION`, and R/Rmd/Quarto
+scripts to build a unified dependency manifest and infer required compiled
+toolchains (`cpp`, `cmdstan`, `rstan`, `tmb`, `jags`, `linear_algebra`,
+`spatial`, `http_ssl`, `graphics`, `arrow`):
+
+```{r scan-env}
+library(slurmpilot)
+
+proj_dir <- tempfile("sp_proj_")
+dir.create(file.path(proj_dir, "R"), recursive = TRUE)
+
+writeLines(c(
+  "Package: multilevelstudy",
+  "Version: 0.1.0",
+  "Imports: lme4, Rcpp, RTMB, dplyr"
+), file.path(proj_dir, "DESCRIPTION"))
+
+writeLines(c(
+  "library(cmdstanr)",
+  "library(ggplot2)",
+  "x <- tibble::tibble(a = 1:3)"
+), file.path(proj_dir, "R", "fit_models.R"))
+
+env <- scan_project_env(path = proj_dir)
+print(env)
+env$toolchains
+names(toolchain_registry())
+```
+
+## 2. Building Reproducible Apptainer `.def` Recipes
+
+`build_apptainer_def()` generates a deterministic Apptainer/Singularity recipe
+pinned to `rocker/r-ver:<r_version>` with minimal `apt-get` system packages,
+C++17 `Makevars`, single-threaded BLAS/OpenMP defaults (preventing thread
+oversubscription across SLURM array jobs), optional CmdStan installation, and
+`%test` verification:
+
+```{r apptainer}
+def <- build_apptainer_def(env, r_version = "4.4.1")
+print(def)
+cat(paste(head(def$recipe, 32L), collapse = "\n"), "\n")
+```
+
+## 3. Rendering Hardened SLURM `sbatch` Scripts
+
+`render_sbatch_script()` renders a POSIX-safe array script with strict defense
+against newline, shell metacharacter, and path-traversal injection. Surgical
+retries compress target indices cleanly with `format_slurm_array_indices()`:
+
+```{r sbatch}
+res <- resource_spec(
+  n_tasks = 100L,
+  chunk_size = 10L,
+  mem_mb = 4096L,
+  time_minutes = 60,
+  cpus_per_task = 2L,
+  partition = "general",
+  account = "quant_lab",
+  max_concurrent = 5L
+)
+
+sb <- render_sbatch_script(
+  job_name = "bayesian_dsem",
+  resources = res,
+  work_dir = "/scratch/researcher/bayesian_dsem",
+  container_sif = "/scratch/containers/slurmpilot_env.sif",
+  modules = c("apptainer/1.3"),
+  mail_type = "FAIL"
+)
+
+cat(sb$text)
+```
+
+## 4. Remote SSH/SLURM Orchestration (`SlurmSshBackend`)
+
+`SlurmSshBackend` communicates exclusively over non-interactive `ssh` and `scp`
+(`BatchMode=yes`, explicit `--` option delimiters, dangerous directive blocking,
+and bounded exponential backoff for transient network blips) — avoiding ZeroMQ
+firewall issues on university clusters.
+
+Use `dry_run = TRUE` to inspect staged files and exact SSH/SCP commands offline:
+
+```{r ssh-dry}
+tmp_stage <- tempfile("sp_ssh_stage_")
+ssh_be <- slurm_ssh_backend(
+  host = "hpc.university.edu",
+  user = "researcher",
+  remote_dir = "/scratch/researcher/slurmpilot",
+  local_stage_dir = tmp_stage,
+  partition = "general",
+  container_sif = "/scratch/containers/slurmpilot_env.sif",
+  ssh_max_retries = 3L,
+  dry_run = TRUE
+)
+
+dry_job <- slurm_submit(
+  backend = ssh_be,
+  fun = function(x) mean(stats::rnorm(x$n)),
+  args_list = lapply(1:10, function(i) list(n = 500)),
+  resources = resource_spec(n_tasks = 10L, chunk_size = 5L, mem_mb = 2048L, time_minutes = 15),
+  name = "dry_run_demo"
+)
+
+print(dry_job)
+names(dry_job$meta$dry_run_commands)
+```
+
+`slurmpilot` also exports hardened SLURM output parsers covering stepped array
+expressions, per-CPU/per-node memory suffixes (`Mc`/`Mn`), and `.batch`
+sub-step consolidation:
+
+```{r parsers}
+parse_slurm_array_spec("1-10:2,15%4")
+parse_slurm_mem(c("1024K", "2.5G", "0.5T", "100Mc", "200Mn"))
+
+parse_squeue_output("482910_1|RUNNING|04:20|cn042|None\n482910_[2-4]|PENDING|0:00||(Priority)")
+
+parse_sacct_output(paste(
+  "482910_1|COMPLETED|00:08:15||0:0",
+  "482910_1.batch|COMPLETED|00:08:15|1536M|0:0",
+  "482910_2|OUT_OF_MEMORY|00:02:10||0:125",
+  "482910_2.batch|OUT_OF_MEMORY|00:02:10|4Gc|0:125",
+  sep = "\n"
+))
+
+unlink(c(proj_dir, tmp_stage), recursive = TRUE)
+```
+
+## 5. Non-Blocking `bslib` / Shiny Offload Modules
+
+Drop `mod_hpc_submit_ui/server` and `mod_hpc_monitor_ui/server` into any
+`bslib` app to run micro-pilots and array jobs in background OS processes while
+keeping the Shiny UI responsive at all times:
+
+```r
+library(shiny)
+library(bslib)
+library(slurmpilot)
+
+ui <- page_fluid(
+  theme = bs_theme(version = 5, bootswatch = "flatly"),
+  mod_hpc_submit_ui("submit", show_fault_toggle = TRUE),
+  mod_hpc_monitor_ui("monitor")
+)
+
+server <- function(input, output, session) {
+  backend <- mock_slurm_backend(max_workers = 2L)
+
+  submit <- mod_hpc_submit_server(
+    id = "submit",
+    backend = backend,
+    fun = function(x) mean(stats::rnorm(x$n)),
+    args_builder = function(n_tasks) lapply(seq_len(n_tasks), function(i) list(n = 1000))
+  )
+
+  monitor <- mod_hpc_monitor_server(
+    id = "monitor",
+    job = submit$job,
+    auto_collect = TRUE,
+    simplify = TRUE
+  )
+}
+
+shinyApp(ui, server)
+```
+
+Run the bundled interactive demo studio via `slurmpilot::run_demo_app()`.

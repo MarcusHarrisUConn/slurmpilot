@@ -22,6 +22,10 @@ sp_merge_env <- function(overrides) {
 #' result collection — enabling 100% offline development and testing on a laptop.
 #'
 #' @export
+#' @examples
+#' be <- MockSlurmBackend$new(max_workers = 2L)
+#' print(be)
+#' unlink(be$root_dir, recursive = TRUE)
 MockSlurmBackend <- R6::R6Class(
   classname = "MockSlurmBackend",
   inherit = SlurmBackend,
@@ -606,7 +610,7 @@ MockSlurmBackend <- R6::R6Class(
               stdout = out_log,
               stderr = err_log,
               env = sp_merge_env(env_overrides),
-              supervise = TRUE
+              supervise = FALSE
             )
 
             rec$procs[[key]] <- proc
@@ -654,6 +658,7 @@ MockSlurmBackend <- R6::R6Class(
 #' @examples
 #' backend <- mock_slurm_backend(max_workers = 2L)
 #' print(backend)
+#' unlink(backend$root_dir, recursive = TRUE)
 mock_slurm_backend <- function(
   root_dir = NULL,
   max_workers = 2L,

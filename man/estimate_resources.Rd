@@ -22,7 +22,9 @@ estimate_resources(
   partition = NULL,
   account = NULL,
   qos = NULL,
-  max_concurrent = NULL
+  max_concurrent = NULL,
+  strategy = c("contiguous", "round_robin", "lpt"),
+  task_weights = NULL
 )
 }
 \arguments{
@@ -72,6 +74,16 @@ Default \code{0.85}.}
 
 \item{max_concurrent}{Optional positive integer array concurrency cap
 (\verb{--array=1-M\%max_concurrent}).}
+
+\item{strategy}{Chunk assignment strategy: \code{"contiguous"} (default),
+\code{"round_robin"}, or \code{"lpt"} (Longest Processing Time first load balancing
+for heterogeneous task workloads).}
+
+\item{task_weights}{Optional positive numeric vector of length \code{n_tasks}
+providing relative per-task runtime/cost weights for \code{"lpt"} load
+balancing. When \code{strategy = "lpt"} and \code{task_weights = NULL}, weights are
+interpolated linearly from the pilot trials across \code{1:n_tasks} (or fall
+back to uniform weights if fewer than 2 distinct pilot indices exist).}
 }
 \value{
 An S3 object of class \code{"slurmpilot_resources"} containing computed
@@ -94,8 +106,8 @@ CPU count \eqn{c_0} with Amdahl parallel efficiency \eqn{\eta}):
 (\code{target_chunk_minutes}) against startup overhead amortization and
 \code{max_array_size}.
 \item Chunk walltime upper bound combines CLT standard-deviation scaling
-(\eqn{\sqrt{k^*}\sigma_t}) with empirical 90th-percentile protection and
-\code{time_safety}.
+(\eqn{\sqrt{k^*}\sigma_t}) with Fenton-Wilkinson log-normal and
+nonparametric upper-quantile protection plus \code{time_safety}.
 \item Chunk memory accounts for baseline RSS, peak net working set, modest
 logarithmic heap fragmentation across sequential replications
 (\eqn{1 + 0.05 \log_2(k^*)}), and \code{mem_safety}.
@@ -115,5 +127,5 @@ res <- estimate_resources(pilot, n_tasks = 500L, target_chunk_minutes = 5)
 print(res)
 }
 \seealso{
-\code{\link[=pilot_run]{pilot_run()}}, \code{\link[=resource_spec]{resource_spec()}}, \code{\link[=as_slurm_flags]{as_slurm_flags()}}
+\code{\link[=pilot_run]{pilot_run()}}, \code{\link[=resource_spec]{resource_spec()}}, \code{\link[=plan_chunks]{plan_chunks()}}, \code{\link[=as_slurm_flags]{as_slurm_flags()}}
 }

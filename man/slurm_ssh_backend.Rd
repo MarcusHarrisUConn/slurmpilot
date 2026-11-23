@@ -19,6 +19,9 @@ slurm_ssh_backend(
   container_binds = character(),
   modules = character(),
   dry_run = FALSE,
+  ssh_max_retries = 2L,
+  ssh_retry_base_sec = 0.5,
+  ssh_retry_max_sec = 8,
   command_runner = NULL
 )
 }
@@ -51,6 +54,12 @@ slurm_ssh_backend(
 
 \item{dry_run}{Logical; record commands without making network calls. Default \code{FALSE}.}
 
+\item{ssh_max_retries}{Non-negative integer retries on transient SSH/SCP transport errors. Default \code{2L}.}
+
+\item{ssh_retry_base_sec}{Base backoff delay in seconds. Default \code{0.5}.}
+
+\item{ssh_retry_max_sec}{Maximum backoff delay cap in seconds. Default \code{8.0}.}
+
 \item{command_runner}{Optional runner \verb{function(cmd, args)} overriding \code{processx::run}.}
 }
 \value{
@@ -62,4 +71,5 @@ Convenience constructor wrapping \link{SlurmSshBackend}\verb{$new(...)}.
 \examples{
 ssh_be <- slurm_ssh_backend(host = "hpc.example.edu", user = "researcher", dry_run = TRUE)
 print(ssh_be)
+unlink(ssh_be$local_stage_dir, recursive = TRUE)
 }

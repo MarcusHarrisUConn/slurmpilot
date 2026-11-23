@@ -1,0 +1,176 @@
+---
+title: "slurmpilot: HPC Field Guide & Quick Reference"
+subtitle: "Auto-Profiling SLURM Orchestration, Apptainer Packaging, and Non-Blocking Shiny Offloading"
+author: "Marcus Harris"
+date: "Version 0.3.0 (2026)"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 2
+    number_sections: true
+    highlight: tango
+geometry: margin=0.85in
+fontsize: 10pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  eval = FALSE
+)
+```
+
+# Overview
+
+`slurmpilot` provides an end-to-end **pilot-to-cluster autopilot** and
+**non-blocking Shiny compute engine** for computationally intensive R
+workflows (Monte Carlo power studies, Bayesian MCMC, mixed-effects and dynamic
+structural equation modeling, and large-scale bootstraps).
+
+| Pillar | Primary Functions | Key Guarantees |
+|---|---|---|
+| **1. Micro-Pilot & Sizing** | `pilot_run()`, `estimate_resources()`, `plan_chunks()`, `inspect_job_globals()` | Real OS process-tree RSS (`ps`), heavy-tailed walltime envelope (CLT + Fenton-Wilkinson log-normal + nonparametric), LPT load balancing, closure bloat detection |
+| **2. HPC Packaging** | `scan_project_env()`, `toolchain_registry()`, `build_apptainer_def()`, `render_sbatch_script()`, `render_worker_script()` | Multi-source scanning (`renv.lock`, `DESCRIPTION`, scripts), compiled toolchain apt recipes (`Rcpp`, `cmdstanr`, `RTMB`, `JAGS`, `sf`), zero-dependency base-R `worker.R` |
+| **3. Pluggable Backends** | `mock_slurm_backend()`, `slurm_ssh_backend()`, `slurm_submit()`, `slurm_retry()`, `slurm_collect()`, `slurm_autopilot()` | Local parallel `MockSlurmBackend` for laptop testing, firewall-safe SSH/SCP with bounded exponential backoff, atomic SHA-256 checkpoints, adaptive OOM/timeout retry escalation, independent `L'Ecuyer-CMRG` parallel RNG |
+| **4. Async Shiny UI** | `mod_hpc_submit_ui/server()`, `mod_hpc_monitor_ui/server()`, `run_demo_app()` | Non-blocking background micro-pilot and polling, `bslib` KPI cards, live chunk telemetry, retry caps, XSS-safe log/table rendering |
+
+# Core Lifecycle Cheat Sheet
+
+## 1. Audit Closures, Profile Empirically & Estimate SLURM Resources
+
+```r
+library(slurmpilot)
+
+# Pre-submit check for >50 MB captured closures or unresolved globals
+inspect_job_globals(worker_fun, args_list = tasks, globals = list(), packages = c("lme4"))
+
+# Empirical OS RSS + startup/execution walltime profiling (isolated child processes)
+pilot <- pilot_run(
+  fun = worker_fun,
+  args_list = tasks,
+  n_pilot = 4L,
+  sample_method = "stratified",
+  seed = 2026L
+)
+
+# Tail-safe SLURM sizing + Longest Processing Time (LPT) heterogeneous chunking
+resources <- estimate_resources(
+  pilot = pilot,
+  n_tasks = length(tasks),
+  target_chunk_minutes = 15,
+  mem_safety = 1.35,
+  time_safety = 1.50,
+  strategy = "lpt",
+  partition = "general"
+)
+as_slurm_flags(resources)
+```
+
+## 2. Run Locally (Mock SLURM) or Remotely (SSH/SLURM)
+
+```r
+# Laptop development (<= 2 workers, full checkpoint/retry fidelity)
+be_local <- mock_slurm_backend(max_workers = 2L)
+
+# Production cluster (BatchMode SSH/SCP, bounded transient backoff, zero ZeroMQ)
+be_hpc <- slurm_ssh_backend(
+  host = "hpc.university.edu",
+  user = "researcher",
+  remote_dir = "/scratch/researcher/slurmpilot",
+  container_sif = "/scratch/containers/slurmpilot_env.sif",
+  partition = "general",
+  ssh_max_retries = 3L
+)
+
+job <- slurm_submit(be_local, worker_fun, tasks, resources = resources, seed = 2026L)
+st  <- slurm_wait(job, progress = TRUE)
+
+# Adaptive surgical retry: auto-bumps --mem on OOM, --time on TIMEOUT
+if (st$n_retryable > 0L) {
+  job <- slurm_retry(job, adaptive = TRUE)
+  st  <- slurm_wait(job, progress = TRUE)
+  slurm_retry_history(job)
+}
+
+# SHA-256 verified ordered result collection
+results <- slurm_collect(job, simplify = TRUE)
+```
+
+## 3. One-Call Autopilot
+
+```r
+run <- slurm_autopilot(
+  fun = worker_fun,
+  args_list = tasks,
+  backend = be_local,
+  n_pilot = 3L,
+  strategy = "lpt",
+  auto_retry = 2L,
+  simplify = TRUE
+)
+```
+
+# Apptainer & SLURM Batch Packaging
+
+```r
+# Scan renv.lock, DESCRIPTION, and R/Rmd/qmd scripts
+env <- scan_project_env(path = ".")
+
+# Emit reproducible Apptainer .def recipe with minimal apt deps & %test checks
+def <- build_apptainer_def(env, output_path = "slurmpilot_env.def")
+# Build on cluster: apptainer build slurmpilot_env.sif slurmpilot_env.def
+
+# Render self-contained SLURM array submission script
+sb <- render_sbatch_script(
+  job_name = "my_study",
+  resources = resources,
+  work_dir = "/scratch/researcher/my_study",
+  container_sif = "/scratch/containers/slurmpilot_env.sif",
+  modules = c("apptainer")
+)
+```
+
+## Detected Compiled Toolchains (`toolchain_registry()`)
+
+- **`cpp`**: `Rcpp`, `RcppArmadillo`, `RcppEigen`, `cpp11`, `BH` (`g++`, `cmake`, `gfortran`)
+- **`cmdstan` / `rstan`**: `cmdstanr`, `rstan`, `brms` (`libtbb-dev`, `CMDSTAN=/opt/cmdstan`, C++17 `Makevars`)
+- **`tmb`**: `TMB`, `RTMB`, `glmmTMB` (`libopenblas-dev`, `liblapack-dev`)
+- **`jags`**: `rjags`, `R2jags`, `runjags` (`jags`, `libjags-dev`)
+- **`spatial`**: `sf`, `terra`, `stars` (`libgdal-dev`, `libgeos-dev`, `libproj-dev`)
+- **`http_ssl` / `graphics` / `arrow`**: `curl`, `openssl`, `xml2`, `ragg`, `arrow`, `duckdb`
+
+# Scaling Math & Security Invariants
+
+## Walltime Upper-Tail Envelope (`estimate_resources()`)
+
+For a chunk of $k$ tasks with startup $\hat{t}_0$, CPU speedup $S(c_0 \to c)$
+via Amdahl's law, and load-imbalance ratio $\lambda \ge 1$:
+
+- **Normal CLT:** $Q^{\text{CLT}}(k) = k \tilde{\mu}_t \lambda + z_{\text{tail}} \sqrt{k}\tilde{\sigma}_t$
+- **Fenton-Wilkinson Log-Normal:** matches mean/variance of $\sum_{j=1}^k X_j$ for heavy-tailed positive runtimes to compute $Q^{\text{LN}}_{0.99}(k)$
+- **Nonparametric Tail Guard:** $Q^{\text{NP}}(k) = \max(k \tilde{q}_{95},\; \tilde{x}_{\max} + (k - 1)\tilde{q}_{75})\lambda$
+- **Requested Walltime:** `--time` rounds $\text{time\_safety} \cdot (\hat{t}_0 + \max(Q^{\text{CLT}}, Q^{\text{LN}}, Q^{\text{NP}}))$ up to clean SLURM increments.
+
+## Security & Reproducibility Hardening
+
+- **Template & CLI Injection Defense (`R/security.R`):** Strict allowlist validation on all `#SBATCH` headers, module names, `env_vars`, Apptainer `.def` fields, paths (`..` traversal blocked), and SSH/SCP arguments (leading `-` blocked, explicit `--` delimiters, `ProxyCommand`/`LocalCommand`/`Include`/`Match` denylist).
+- **Atomic SHA-256 Checkpoints:** Every chunk writes `results/chunk_XXXX.rds` atomically with a `.sha256` sidecar verified by `verify_checkpoint()` and `slurm_collect()`.
+- **Independent Parallel RNG:** `worker.R` uses `L'Ecuyer-CMRG` via `parallel::nextRNGStream()` ($2^{127}$ spacing between chunks) and `parallel::nextRNGSubStream()` ($2^{76}$ spacing between tasks), inspectable via `slurmpilot_rng_stream()` with zero `.Random.seed` pollution.
+
+# Non-Blocking Shiny Offloading
+
+```r
+ui <- bslib::page_fluid(
+  mod_hpc_submit_ui("submit", show_fault_toggle = TRUE),
+  mod_hpc_monitor_ui("monitor")
+)
+
+server <- function(input, output, session) {
+  be  <- mock_slurm_backend(max_workers = 2L)
+  sub <- mod_hpc_submit_server("submit", backend = be, fun = worker_fun, args_builder = build_args)
+  mon <- mod_hpc_monitor_server("monitor", job = sub$job, auto_collect = TRUE, simplify = TRUE)
+}
+```
+
+Launch the bundled Monte Carlo Studio interactively via `slurmpilot::run_demo_app()`.

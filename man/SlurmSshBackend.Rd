@@ -15,6 +15,11 @@ Accepts an injectable \code{command_runner} callback (defaulting to
 \code{processx::run}) and \code{dry_run = TRUE} mode so every SSH/SLURM workflow can be
 verified offline in contract and snapshot tests.
 }
+\examples{
+ssh <- SlurmSshBackend$new(host = "hpc.example.edu", user = "researcher", dry_run = TRUE)
+print(ssh)
+unlink(ssh$local_stage_dir, recursive = TRUE)
+}
 \section{Super class}{
 \code{\link[slurmpilot:SlurmBackend]{SlurmBackend}} -> \code{SlurmSshBackend}
 }
@@ -50,6 +55,12 @@ verified offline in contract and snapshot tests.
     \item{\code{modules}}{Optional HPC environment modules loaded in \code{sbatch}.}
 
     \item{\code{dry_run}}{Logical; if \code{TRUE}, stages bundles locally and records commands without executing SSH/SCP.}
+
+    \item{\code{ssh_max_retries}}{Non-negative integer transient SSH/SCP retry limit (default \code{2L}).}
+
+    \item{\code{ssh_retry_base_sec}}{Base delay in seconds for bounded exponential SSH backoff (default \code{0.5}).}
+
+    \item{\code{ssh_retry_max_sec}}{Maximum backoff delay cap in seconds (default \code{8.0}).}
 
     \item{\code{command_runner}}{Function \verb{(cmd, args)} returning \code{list(status, stdout, stderr)}.}
   }
@@ -97,6 +108,9 @@ verified offline in contract and snapshot tests.
   container_binds = character(),
   modules = character(),
   dry_run = FALSE,
+  ssh_max_retries = 2L,
+  ssh_retry_base_sec = 0.5,
+  ssh_retry_max_sec = 8,
   command_runner = NULL
 )}
     \if{html}{\out{</div>}}
@@ -118,6 +132,9 @@ verified offline in contract and snapshot tests.
       \item{\code{container_binds}}{Optional character vector of Apptainer bind mounts.}
       \item{\code{modules}}{Optional character vector of HPC modules to load.}
       \item{\code{dry_run}}{Logical; record commands without making network calls. Default \code{FALSE}.}
+      \item{\code{ssh_max_retries}}{Non-negative integer retries on transient SSH/SCP transport errors. Default \code{2L}.}
+      \item{\code{ssh_retry_base_sec}}{Base backoff delay in seconds. Default \code{0.5}.}
+      \item{\code{ssh_retry_max_sec}}{Maximum backoff delay cap in seconds. Default \code{8.0}.}
       \item{\code{command_runner}}{Optional runner \verb{function(cmd, args)} overriding \code{processx::run}.}
     }
     \if{html}{\out{</div>}}

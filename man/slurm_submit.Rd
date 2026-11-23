@@ -46,6 +46,14 @@ Submits either a pre-built \code{\link[=slurm_job_spec]{slurm_job_spec()}} or a 
 workload to any \link{SlurmBackend} (such as \link{MockSlurmBackend} or
 \link{SlurmSshBackend}).
 }
+\examples{
+be <- mock_slurm_backend(max_workers = 1L)
+job <- slurm_submit(be, function(x) x + 1, as.list(1:4),
+                    resources = resource_spec(4L, chunk_size = 2L))
+st <- slurm_wait(job, poll_interval = 0.05)
+slurm_collect(job, simplify = TRUE)
+unlink(be$root_dir, recursive = TRUE)
+}
 \seealso{
 \code{\link[=slurm_status]{slurm_status()}}, \code{\link[=slurm_wait]{slurm_wait()}}, \code{\link[=slurm_retry]{slurm_retry()}}, \code{\link[=slurm_collect]{slurm_collect()}}
 }

@@ -1,6 +1,6 @@
 Package: slurmpilot
-Title: Auto-Profiling SLURM HPC Orchestration and Async Shiny Offloading
-Version: 0.2.0
+Title: Auto-Profiling 'SLURM' HPC Orchestration and 'Shiny' Offloading
+Version: 0.3.0
 Authors@R:
     person(
         given = "Marcus",
@@ -12,15 +12,19 @@ Description: Eliminates manual 'SLURM' scripting, blind memory and walltime
     guessing, and 'Shiny' server freezes for compute-heavy R workflows. Runs
     empirical micro-pilot replications in isolated child processes to measure
     true peak resident memory and runtime distributions, computes optimal
-    'SLURM' array chunking and resource flags, scans project environments to
-    emit reproducible 'Apptainer' container recipes and batch scripts,
-    orchestrates remote 'SSH'/'SLURM' or local parallel mock-'SLURM' execution
-    with atomic chunk checkpointing and surgical retries, and provides
-    non-blocking 'bslib'/'Shiny' telemetry modules.
+    'SLURM' array chunking (including Longest Processing Time load balancing)
+    and resource flags, audits closures and globals before staging, scans
+    project environments to emit reproducible 'Apptainer' container recipes
+    and batch scripts, orchestrates remote 'SSH'/'SLURM' or local parallel
+    mock-'SLURM' execution with atomic SHA-256 checkpoints, independent
+    parallel random-number streams, and adaptive surgical retries, and
+    provides non-blocking 'bslib'/'Shiny' telemetry modules.
 License: MIT + file LICENSE
-URL: https://github.com/MarcusHarrisUConn/slurmpilot
+URL: https://github.com/MarcusHarrisUConn/slurmpilot,
+    https://marcusharrisphd.com/slurmpilot/
 BugReports: https://github.com/MarcusHarrisUConn/slurmpilot/issues
 Encoding: UTF-8
+Language: en-US
 Roxygen: list(markdown = TRUE)
 Config/testthat/edition: 3
 Depends:
@@ -30,6 +34,7 @@ Imports:
     callr,
     checkmate,
     cli,
+    codetools,
     digest,
     graphics,
     jsonlite,
@@ -46,10 +51,9 @@ Suggests:
     grDevices,
     htmltools,
     knitr,
-    quarto,
     rmarkdown,
     shiny,
     testthat (>= 3.0.0),
     withr
-VignetteBuilder: quarto
+VignetteBuilder: knitr
 Config/roxygen2/version: 8.1.0

@@ -20,6 +20,13 @@ value boxes (state, chunk progress, peak RSS, cumulative walltime), a
 multi-segment chunk progress bar, surgical retry / cancel / pause / collect
 controls, a per-chunk status table, and an interactive chunk log viewer.
 }
+\examples{
+if (requireNamespace("shiny", quietly = TRUE) &&
+    requireNamespace("bslib", quietly = TRUE)) {
+  ui <- mod_hpc_monitor_ui("hpc_mon")
+  inherits(ui, "shiny.tag")
+}
+}
 \seealso{
 \code{\link[=mod_hpc_monitor_server]{mod_hpc_monitor_server()}}, \code{\link[=mod_hpc_submit_ui]{mod_hpc_submit_ui()}}
 }

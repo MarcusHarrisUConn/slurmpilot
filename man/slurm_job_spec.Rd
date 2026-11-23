@@ -15,7 +15,8 @@ slurm_job_spec(
   continue_on_error = FALSE,
   container_sif = NULL,
   modules = character(),
-  env_vars = list()
+  env_vars = list(),
+  warn_bundle_mb = 50
 )
 }
 \arguments{
@@ -43,6 +44,10 @@ even if individual tasks error. Default \code{FALSE}.}
 \item{modules}{Optional character vector of HPC modules to load.}
 
 \item{env_vars}{Optional named list/vector of extra environment variables.}
+
+\item{warn_bundle_mb}{Optional numeric size threshold in MB (default \code{50});
+emits a diagnostic warning if the serialized payload (\code{fun}, closure,
+\code{args_list}, \code{globals}) exceeds this threshold. Set \code{Inf} to disable.}
 }
 \value{
 An S3 object of class \code{"slurmpilot_job_spec"}.
@@ -62,5 +67,5 @@ spec <- slurm_job_spec(
 print(spec)
 }
 \seealso{
-\code{\link[=slurm_submit]{slurm_submit()}}, \code{\link[=estimate_resources]{estimate_resources()}}
+\code{\link[=slurm_submit]{slurm_submit()}}, \code{\link[=estimate_resources]{estimate_resources()}}, \code{\link[=inspect_job_globals]{inspect_job_globals()}}
 }

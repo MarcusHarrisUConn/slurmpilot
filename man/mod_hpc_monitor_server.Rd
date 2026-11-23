@@ -48,6 +48,28 @@ state and resuming immediately on new submissions or surgical retries).
 Handles chunk-level surgical retries, job cancellation, polling pause/resume,
 automatic or manual result collection, and log inspection.
 }
+\examples{
+\donttest{
+if (interactive() && requireNamespace("shiny", quietly = TRUE) &&
+    requireNamespace("bslib", quietly = TRUE)) {
+  ui <- bslib::page_fluid(
+    mod_hpc_submit_ui("sub"),
+    mod_hpc_monitor_ui("mon")
+  )
+  server <- function(input, output, session) {
+    be <- mock_slurm_backend(max_workers = 2L)
+    sub <- mod_hpc_submit_server(
+      "sub",
+      backend = be,
+      fun = function(x) x^2,
+      args_builder = function(n) as.list(seq_len(n))
+    )
+    mod_hpc_monitor_server("mon", job = sub$job)
+  }
+  shiny::shinyApp(ui, server)
+}
+}
+}
 \seealso{
 \code{\link[=mod_hpc_monitor_ui]{mod_hpc_monitor_ui()}}, \code{\link[=mod_hpc_submit_server]{mod_hpc_submit_server()}}
 }

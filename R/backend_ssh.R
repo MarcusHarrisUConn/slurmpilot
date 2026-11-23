@@ -258,10 +258,10 @@ parse_sacct_output <- function(stdout) {
     raw_id <- trimws(fields[[1L]])
     if (!nzchar(raw_id)) next
 
-    # Skip .extern steps
-    if (grepl("\\.extern$", raw_id)) next
+    # Skip .extern and .interactive overhead steps; fold .batch / .0 sub-step MaxRSS onto parent
+    if (grepl("\\.(extern|interactive)$", raw_id)) next
 
-    is_batch <- grepl("\\.batch$", raw_id)
+    is_substep <- grepl("\\.(batch|[0-9]+)$", raw_id)
     clean_id <- sub("\\..*$", "", raw_id)
 
     # Ignore unexpanded array meta-rows like 12345_[1-4] in sacct
@@ -298,7 +298,7 @@ parse_sacct_output <- function(stdout) {
       )
     } else {
       cur <- records[[key]]
-      if (is_batch) {
+      if (is_substep) {
         if (!is.na(rss_mb)) {
           cur$peak_rss_mb <- if (is.na(cur$peak_rss_mb)) rss_mb else max(cur$peak_rss_mb, rss_mb)
         }
@@ -370,6 +370,10 @@ build_scancel_command <- function(slurm_job_id, chunks = NULL) {
 #' verified offline in contract and snapshot tests.
 #'
 #' @export
+#' @examples
+#' ssh <- SlurmSshBackend$new(host = "hpc.example.edu", user = "researcher", dry_run = TRUE)
+#' print(ssh)
+#' unlink(ssh$local_stage_dir, recursive = TRUE)
 SlurmSshBackend <- R6::R6Class(
   classname = "SlurmSshBackend",
   inherit = SlurmBackend,
@@ -404,6 +408,12 @@ SlurmSshBackend <- R6::R6Class(
     modules = character(),
     #' @field dry_run Logical; if `TRUE`, stages bundles locally and records commands without executing SSH/SCP.
     dry_run = FALSE,
+    #' @field ssh_max_retries Non-negative integer transient SSH/SCP retry limit (default `2L`).
+    ssh_max_retries = 2L,
+    #' @field ssh_retry_base_sec Base delay in seconds for bounded exponential SSH backoff (default `0.5`).
+    ssh_retry_base_sec = 0.5,
+    #' @field ssh_retry_max_sec Maximum backoff delay cap in seconds (default `8.0`).
+    ssh_retry_max_sec = 8.0,
     #' @field command_runner Function `(cmd, args)` returning `list(status, stdout, stderr)`.
     command_runner = NULL,
 
@@ -422,6 +432,9 @@ SlurmSshBackend <- R6::R6Class(
     #' @param container_binds Optional character vector of Apptainer bind mounts.
     #' @param modules Optional character vector of HPC modules to load.
     #' @param dry_run Logical; record commands without making network calls. Default `FALSE`.
+    #' @param ssh_max_retries Non-negative integer retries on transient SSH/SCP transport errors. Default `2L`.
+    #' @param ssh_retry_base_sec Base backoff delay in seconds. Default `0.5`.
+    #' @param ssh_retry_max_sec Maximum backoff delay cap in seconds. Default `8.0`.
     #' @param command_runner Optional runner `function(cmd, args)` overriding `processx::run`.
     initialize = function(
       host,
@@ -438,6 +451,9 @@ SlurmSshBackend <- R6::R6Class(
       container_binds = character(),
       modules = character(),
       dry_run = FALSE,
+      ssh_max_retries = 2L,
+      ssh_retry_base_sec = 0.5,
+      ssh_retry_max_sec = 8.0,
       command_runner = NULL
     ) {
       sp_assert_safe_ssh_host(host, arg = "host")
@@ -457,6 +473,9 @@ SlurmSshBackend <- R6::R6Class(
       sp_assert_safe_apptainer_bind(container_binds, arg = "container_binds")
       sp_assert_safe_module_name(modules, arg = "modules")
       checkmate::assert_flag(dry_run)
+      checkmate::assert_int(ssh_max_retries, lower = 0L, upper = 10L)
+      checkmate::assert_number(ssh_retry_base_sec, lower = 0, finite = TRUE)
+      checkmate::assert_number(ssh_retry_max_sec, lower = 0, finite = TRUE)
       if (!is.null(command_runner)) checkmate::assert_function(command_runner)
 
       self$host <- host
@@ -477,6 +496,9 @@ SlurmSshBackend <- R6::R6Class(
       self$container_binds <- container_binds
       self$modules <- modules
       self$dry_run <- dry_run
+      self$ssh_max_retries <- as.integer(ssh_max_retries)
+      self$ssh_retry_base_sec <- ssh_retry_base_sec
+      self$ssh_retry_max_sec <- ssh_retry_max_sec
       self$command_runner <- command_runner %||% function(cmd, args) {
         processx::run(command = cmd, args = args, error_on_status = FALSE)
       }
@@ -871,9 +893,42 @@ SlurmSshBackend <- R6::R6Class(
       )
     },
 
+    is_transient_ssh_error = function(res) {
+      status <- suppressWarnings(as.integer(res$status %||% 1L))
+      if (identical(status, 0L)) return(FALSE)
+      err <- as.character(res$stderr %||% "")
+      # Never retry permanent authentication or permission errors
+      if (grepl("Permission denied|Authentication failed|Host key verification failed|No such file", err, ignore.case = TRUE)) {
+        return(FALSE)
+      }
+      identical(status, 255L) || grepl(
+        "Connection reset|Broken pipe|Connection timed out|Temporary failure|kex_exchange_identification|ssh_exchange_identification|Connection closed|Operation timed out",
+        err,
+        ignore.case = TRUE
+      )
+    },
+
+    run_with_backoff = function(cmd, args) {
+      max_tries <- 1L + as.integer(self$ssh_max_retries %||% 0L)
+      res <- NULL
+      for (attempt in seq_len(max_tries)) {
+        res <- self$command_runner(cmd, args)
+        if (identical(as.integer(res$status %||% 1L), 0L)) {
+          return(res)
+        }
+        if (attempt < max_tries && private$is_transient_ssh_error(res)) {
+          delay <- min(self$ssh_retry_max_sec, self$ssh_retry_base_sec * (2^(attempt - 1L)))
+          if (delay > 0) Sys.sleep(delay)
+          next
+        }
+        break
+      }
+      res
+    },
+
     exec_ssh = function(remote_cmd, allow_error = FALSE) {
       args <- private$ssh_args(remote_cmd)
-      res <- self$command_runner("ssh", args)
+      res <- private$run_with_backoff("ssh", args)
       if (!isTRUE(allow_error) && !identical(as.integer(res$status), 0L)) {
         cli::cli_abort(c(
           "SSH command failed (exit {res$status}): {.code {remote_cmd}}",
@@ -885,7 +940,7 @@ SlurmSshBackend <- R6::R6Class(
 
     exec_scp = function(src, dest, recursive = FALSE) {
       args <- private$scp_args(src, dest, recursive = recursive)
-      res <- self$command_runner("scp", args)
+      res <- private$run_with_backoff("scp", args)
       if (!identical(as.integer(res$status), 0L)) {
         cli::cli_abort(c(
           "SCP transfer failed (exit {res$status}) -> {.val {dest}}",
@@ -915,12 +970,16 @@ SlurmSshBackend <- R6::R6Class(
 #' @param container_binds Optional character vector of Apptainer bind mounts.
 #' @param modules Optional character vector of HPC modules to load.
 #' @param dry_run Logical; record commands without making network calls. Default `FALSE`.
+#' @param ssh_max_retries Non-negative integer retries on transient SSH/SCP transport errors. Default `2L`.
+#' @param ssh_retry_base_sec Base backoff delay in seconds. Default `0.5`.
+#' @param ssh_retry_max_sec Maximum backoff delay cap in seconds. Default `8.0`.
 #' @param command_runner Optional runner `function(cmd, args)` overriding `processx::run`.
 #' @return A [SlurmSshBackend] R6 object.
 #' @export
 #' @examples
 #' ssh_be <- slurm_ssh_backend(host = "hpc.example.edu", user = "researcher", dry_run = TRUE)
 #' print(ssh_be)
+#' unlink(ssh_be$local_stage_dir, recursive = TRUE)
 slurm_ssh_backend <- function(
   host,
   user = NULL,
@@ -936,6 +995,9 @@ slurm_ssh_backend <- function(
   container_binds = character(),
   modules = character(),
   dry_run = FALSE,
+  ssh_max_retries = 2L,
+  ssh_retry_base_sec = 0.5,
+  ssh_retry_max_sec = 8.0,
   command_runner = NULL
 ) {
   SlurmSshBackend$new(
@@ -953,6 +1015,9 @@ slurm_ssh_backend <- function(
     container_binds = container_binds,
     modules = modules,
     dry_run = dry_run,
+    ssh_max_retries = ssh_max_retries,
+    ssh_retry_base_sec = ssh_retry_base_sec,
+    ssh_retry_max_sec = ssh_retry_max_sec,
     command_runner = command_runner
   )
 }

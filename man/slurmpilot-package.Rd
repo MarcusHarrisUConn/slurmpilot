@@ -4,14 +4,15 @@
 \name{slurmpilot-package}
 \alias{slurmpilot}
 \alias{slurmpilot-package}
-\title{slurmpilot: Auto-Profiling SLURM HPC Orchestration and Async Shiny Offloading}
+\title{slurmpilot: Auto-Profiling 'SLURM' HPC Orchestration and 'Shiny' Offloading}
 \description{
-Eliminates manual 'SLURM' scripting, blind memory and walltime guessing, and 'Shiny' server freezes for compute-heavy R workflows. Runs empirical micro-pilot replications in isolated child processes to measure true peak resident memory and runtime distributions, computes optimal 'SLURM' array chunking and resource flags, scans project environments to emit reproducible 'Apptainer' container recipes and batch scripts, orchestrates remote 'SSH'/'SLURM' or local parallel mock-'SLURM' execution with atomic chunk checkpointing and surgical retries, and provides non-blocking 'bslib'/'Shiny' telemetry modules.
+Eliminates manual 'SLURM' scripting, blind memory and walltime guessing, and 'Shiny' server freezes for compute-heavy R workflows. Runs empirical micro-pilot replications in isolated child processes to measure true peak resident memory and runtime distributions, computes optimal 'SLURM' array chunking (including Longest Processing Time load balancing) and resource flags, audits closures and globals before staging, scans project environments to emit reproducible 'Apptainer' container recipes and batch scripts, orchestrates remote 'SSH'/'SLURM' or local parallel mock-'SLURM' execution with atomic SHA-256 checkpoints, independent parallel random-number streams, and adaptive surgical retries, and provides non-blocking 'bslib'/'Shiny' telemetry modules.
 }
 \seealso{
 Useful links:
 \itemize{
   \item \url{https://github.com/MarcusHarrisUConn/slurmpilot}
+  \item \url{https://marcusharrisphd.com/slurmpilot/}
   \item Report bugs at \url{https://github.com/MarcusHarrisUConn/slurmpilot/issues}
 }
 

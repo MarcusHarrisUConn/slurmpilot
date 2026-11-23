@@ -16,8 +16,8 @@
 #'   (`target_chunk_minutes`) against startup overhead amortization and
 #'   `max_array_size`.
 #' - Chunk walltime upper bound combines CLT standard-deviation scaling
-#'   (\eqn{\sqrt{k^*}\sigma_t}) with empirical 90th-percentile protection and
-#'   `time_safety`.
+#'   (\eqn{\sqrt{k^*}\sigma_t}) with Fenton-Wilkinson log-normal and
+#'   nonparametric upper-quantile protection plus `time_safety`.
 #' - Chunk memory accounts for baseline RSS, peak net working set, modest
 #'   logarithmic heap fragmentation across sequential replications
 #'   (\eqn{1 + 0.05 \log_2(k^*)}), and `mem_safety`.
@@ -51,12 +51,20 @@
 #' @param qos Optional SLURM `--qos` name.
 #' @param max_concurrent Optional positive integer array concurrency cap
 #'   (`--array=1-M%max_concurrent`).
+#' @param strategy Chunk assignment strategy: `"contiguous"` (default),
+#'   `"round_robin"`, or `"lpt"` (Longest Processing Time first load balancing
+#'   for heterogeneous task workloads).
+#' @param task_weights Optional positive numeric vector of length `n_tasks`
+#'   providing relative per-task runtime/cost weights for `"lpt"` load
+#'   balancing. When `strategy = "lpt"` and `task_weights = NULL`, weights are
+#'   interpolated linearly from the pilot trials across `1:n_tasks` (or fall
+#'   back to uniform weights if fewer than 2 distinct pilot indices exist).
 #'
 #' @return An S3 object of class `"slurmpilot_resources"` containing computed
 #'   chunking, SLURM resource values, formatted flags (`slurm_flags`),
 #'   partition table (`chunks`), and diagnostic scaling estimates (`estimates`).
 #'
-#' @seealso [pilot_run()], [resource_spec()], [as_slurm_flags()]
+#' @seealso [pilot_run()], [resource_spec()], [plan_chunks()], [as_slurm_flags()]
 #' @export
 #' @examples
 #' args <- lapply(1:10, function(i) list(n = 200, seed = i))
@@ -88,7 +96,9 @@ estimate_resources <- function(
   partition = NULL,
   account = NULL,
   qos = NULL,
-  max_concurrent = NULL
+  max_concurrent = NULL,
+  strategy = c("contiguous", "round_robin", "lpt"),
+  task_weights = NULL
 ) {
   checkmate::assert_class(pilot, "slurmpilot_pilot")
   checkmate::assert_int(n_tasks, lower = 1L)
@@ -113,6 +123,10 @@ estimate_resources <- function(
   if (!is.null(account)) sp_assert_safe_slurm_token(account, arg = "account")
   if (!is.null(qos)) sp_assert_safe_slurm_token(qos, arg = "qos")
   if (!is.null(max_concurrent)) checkmate::assert_int(max_concurrent, lower = 1L)
+  strategy <- match.arg(strategy)
+  if (!is.null(task_weights)) {
+    checkmate::assert_numeric(task_weights, len = n_tasks, lower = 0, finite = TRUE, any.missing = FALSE)
+  }
 
   s <- pilot$summary
   if (is.null(s$n_ok) || s$n_ok < 1L) {
@@ -177,18 +191,46 @@ estimate_resources <- function(
   chunk_size <- as.integer(max(k_lower, min(k_upper, max(k_time, k_cap))))
   n_chunks <- as.integer(ceiling(n_tasks / chunk_size))
 
+  # Derive LPT weights from pilot runtimes if requested without explicit task_weights
+  eff_weights <- task_weights
+  if (strategy == "lpt" && is.null(eff_weights)) {
+    if (nrow(ok_trials) >= 2L && length(unique(ok_trials$task_index)) >= 2L) {
+      eff_weights <- stats::approx(
+        x = ok_trials$task_index,
+        y = pmax(ok_trials$exec_sec, 1e-5),
+        xout = seq_len(n_tasks),
+        rule = 2
+      )$y
+    } else {
+      eff_weights <- rep(mu_t, n_tasks)
+    }
+  }
+
+  # Preview chunk partitioning so heterogeneous load imbalance informs walltime
+  preview_chunks <- sp_partition_tasks(
+    n_tasks = n_tasks,
+    chunk_size = chunk_size,
+    strategy = strategy,
+    task_weights = eff_weights
+  )
+  load_imbalance <- if (mean(preview_chunks$estimated_weight) > 0) {
+    max(preview_chunks$estimated_weight) / mean(preview_chunks$estimated_weight)
+  } else {
+    1
+  }
+
   # 3. Robust walltime prediction: max(CLT, Fenton-Wilkinson Log-Normal, Nonparametric tail)
   df <- max(1L, as.integer(n_ok) - 1L)
   z_tail <- min(3.5, max(2.326, stats::qt(0.99, df = df)))
-  expected_chunk_sec <- t0 + chunk_size * mu_t
+  expected_chunk_sec <- t0 + chunk_size * mu_t * load_imbalance
 
   # (a) Normal CLT sum upper bound
-  pred_clt_exec <- chunk_size * mu_t + z_tail * sqrt(chunk_size) * sd_t
+  pred_clt_exec <- chunk_size * mu_t * load_imbalance + z_tail * sqrt(chunk_size) * sd_t
 
   # (b) Fenton-Wilkinson log-normal sum approximation for skewed positive runtimes
   ln_mean_1 <- exp(log_mu + 0.5 * log_sd^2)
   ln_cv2_1 <- exp(log_sd^2) - 1
-  ln_sum_mean <- chunk_size * ln_mean_1
+  ln_sum_mean <- chunk_size * ln_mean_1 * load_imbalance
   ln_sum_sigma2 <- log(1 + ln_cv2_1 / chunk_size)
   ln_sum_mu <- log(ln_sum_mean) - 0.5 * ln_sum_sigma2
   pred_ln_exec <- exp(ln_sum_mu + z_tail * sqrt(ln_sum_sigma2))
@@ -196,7 +238,7 @@ estimate_resources <- function(
   pred_ln_exec <- min(pred_ln_exec, 5 * chunk_size * max_t)
 
   # (c) Nonparametric order-statistic protection (survives worst observed spike + rest at q75, or q95 linear)
-  pred_np_exec <- max(chunk_size * q95_t, max_t + (chunk_size - 1) * q75_t)
+  pred_np_exec <- max(chunk_size * q95_t, max_t + (chunk_size - 1) * q75_t) * load_imbalance
 
   candidates <- c(clt = pred_clt_exec, lognormal = pred_ln_exec, nonparametric = pred_np_exec)
   dominant_idx <- which.max(candidates)
@@ -261,7 +303,9 @@ estimate_resources <- function(
     partition = partition,
     account = account,
     qos = qos,
-    max_concurrent = max_concurrent
+    max_concurrent = max_concurrent,
+    strategy = strategy,
+    task_weights = eff_weights
   )
 
   res$estimates <- list(
@@ -275,6 +319,8 @@ estimate_resources <- function(
     per_task_q95_sec = q95_t,
     per_task_max_sec = max_t,
     cpu_speedup = speedup,
+    chunk_strategy = strategy,
+    load_imbalance = load_imbalance,
     expected_chunk_sec = expected_chunk_sec,
     predicted_chunk_sec = pred_chunk_sec,
     pred_clt_sec = t0 + pred_clt_exec,
@@ -317,9 +363,13 @@ estimate_resources <- function(
 #' @param account Optional SLURM `--account`.
 #' @param qos Optional SLURM `--qos`.
 #' @param max_concurrent Optional positive integer array concurrency cap.
+#' @param strategy Chunk assignment strategy: `"contiguous"` (default),
+#'   `"round_robin"`, or `"lpt"`.
+#' @param task_weights Optional positive numeric vector of length `n_tasks`
+#'   required when `strategy = "lpt"`.
 #'
 #' @return An S3 object of class `"slurmpilot_resources"`.
-#' @seealso [estimate_resources()], [as_slurm_flags()]
+#' @seealso [estimate_resources()], [plan_chunks()], [as_slurm_flags()]
 #' @export
 #' @examples
 #' spec <- resource_spec(n_tasks = 100, chunk_size = 10, mem_mb = 2048, time_minutes = 30)
@@ -333,7 +383,9 @@ resource_spec <- function(
   partition = NULL,
   account = NULL,
   qos = NULL,
-  max_concurrent = NULL
+  max_concurrent = NULL,
+  strategy = c("contiguous", "round_robin", "lpt"),
+  task_weights = NULL
 ) {
   checkmate::assert_int(n_tasks, lower = 1L)
   checkmate::assert_int(chunk_size, lower = 1L)
@@ -344,9 +396,10 @@ resource_spec <- function(
   if (!is.null(account)) sp_assert_safe_slurm_token(account, arg = "account")
   if (!is.null(qos)) sp_assert_safe_slurm_token(qos, arg = "qos")
   if (!is.null(max_concurrent)) checkmate::assert_int(max_concurrent, lower = 1L)
+  strategy <- match.arg(strategy)
 
   chunk_size <- min(as.integer(chunk_size), as.integer(n_tasks))
-  chunks <- sp_partition_tasks(n_tasks, chunk_size)
+  chunks <- sp_partition_tasks(n_tasks, chunk_size, strategy = strategy, task_weights = task_weights)
   n_chunks <- nrow(chunks)
 
   mem_mb_int <- as.integer(ceiling(mem_mb))
@@ -360,6 +413,7 @@ resource_spec <- function(
       n_tasks = as.integer(n_tasks),
       chunk_size = chunk_size,
       n_chunks = as.integer(n_chunks),
+      strategy = strategy,
       mem_mb = mem_mb_int,
       mem_slurm = mem_slurm,
       time_sec = time_sec,
@@ -384,7 +438,8 @@ resource_spec <- function(
 #'
 #' Creates a copy of a `slurmpilot_resources` specification with memory and/or
 #' walltime scaled by positive multipliers, commonly used when surgically
-#' retrying failed `OUT_OF_MEMORY` or `TIMEOUT` chunks.
+#' retrying failed `OUT_OF_MEMORY` or `TIMEOUT` chunks. Preserves exact
+#' chunk-to-task assignments.
 #'
 #' @param resources A `slurmpilot_resources` object.
 #' @param mem_multiplier Positive numeric multiplier for `mem_mb`. Default `1`.
@@ -394,6 +449,10 @@ resource_spec <- function(
 #'
 #' @return Updated `slurmpilot_resources` object.
 #' @export
+#' @examples
+#' base <- resource_spec(n_tasks = 20, chunk_size = 5, mem_mb = 1024, time_minutes = 10)
+#' bumped <- scale_resources(base, mem_multiplier = 1.5, time_multiplier = 2.0)
+#' as_slurm_flags(bumped)
 scale_resources <- function(
   resources,
   mem_multiplier = 1,
@@ -428,6 +487,9 @@ scale_resources <- function(
     qos = resources$qos,
     max_concurrent = resources$max_concurrent
   )
+  # Preserve exact original chunk assignments (including round_robin / lpt)
+  updated$chunks <- resources$chunks
+  updated$strategy <- resources$strategy %||% "contiguous"
   updated$estimates <- resources$estimates
   updated$assumptions <- resources$assumptions
   updated
@@ -445,6 +507,10 @@ scale_resources <- function(
 #'
 #' @return Character vector of SLURM flags (e.g. `c("--array=1-10", "--mem=2G", ...)`).
 #' @export
+#' @examples
+#' res <- resource_spec(n_tasks = 20, chunk_size = 5, mem_mb = 2048, time_minutes = 30)
+#' as_slurm_flags(res)
+#' as_slurm_flags(res, array_indices = c(2L, 4L))
 as_slurm_flags <- function(x, array_indices = NULL, ...) {
   UseMethod("as_slurm_flags")
 }
