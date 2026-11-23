@@ -47,6 +47,7 @@ result collection — enabling 100\% offline development and testing on a laptop
     \item \href{#method-MockSlurmBackend-cancel}{\code{MockSlurmBackend$cancel()}}
     \item \href{#method-MockSlurmBackend-logs}{\code{MockSlurmBackend$logs()}}
     \item \href{#method-MockSlurmBackend-collect}{\code{MockSlurmBackend$collect()}}
+    \item \href{#method-MockSlurmBackend-shutdown}{\code{MockSlurmBackend$shutdown()}}
     \item \href{#method-MockSlurmBackend-print}{\code{MockSlurmBackend$print()}}
     \item \href{#method-MockSlurmBackend-clone}{\code{MockSlurmBackend$clone()}}
   }
@@ -261,6 +262,21 @@ R installation's \code{Rscript}.}
   }
   \subsection{Returns}{
     Ordered list (or simplified vector/tibble) of task results.
+  }
+}
+
+\if{html}{\out{<hr>}}
+\if{html}{\out{<a id="method-MockSlurmBackend-shutdown"></a>}}
+\if{latex}{\out{\hypertarget{method-MockSlurmBackend-shutdown}{}}}
+\subsection{\code{MockSlurmBackend$shutdown()}}{
+  Terminate and reap all active background worker processes cleanly.
+  \subsection{Usage}{
+    \if{html}{\out{<div class="r">}}
+    \preformatted{MockSlurmBackend$shutdown()}
+    \if{html}{\out{</div>}}
+  }
+  \subsection{Returns}{
+    Integer count of reaped worker processes (invisibly).
   }
 }
 

@@ -1,6 +1,6 @@
 Package: slurmpilot
 Title: Auto-Profiling SLURM HPC Orchestration and Async Shiny Offloading
-Version: 0.1.0
+Version: 0.2.0
 Authors@R:
     person(
         given = "Marcus",
@@ -33,6 +33,7 @@ Imports:
     digest,
     graphics,
     jsonlite,
+    parallel,
     processx,
     ps,
     rlang,

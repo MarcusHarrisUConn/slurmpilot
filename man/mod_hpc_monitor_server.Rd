@@ -9,7 +9,9 @@ mod_hpc_monitor_server(
   job,
   poll_ms = 400L,
   auto_collect = TRUE,
-  simplify = FALSE
+  simplify = FALSE,
+  max_retries = 5L,
+  retry_mem_multiplier = 1.5
 )
 }
 \arguments{
@@ -23,6 +25,12 @@ mod_hpc_monitor_server(
 ordered results once the job reaches \code{"COMPLETED"}.}
 
 \item{simplify}{Logical passed to \code{\link[=slurm_collect]{slurm_collect()}}. Default \code{FALSE}.}
+
+\item{max_retries}{Positive integer cap on surgical retry button clicks per
+job (clamped to \verb{[1, 50]}). Default \code{5L}.}
+
+\item{retry_mem_multiplier}{Memory scaling multiplier applied when
+\code{bump_mem} is checked (clamped to \verb{[1.0, 4.0]}). Default \code{1.5}.}
 }
 \value{
 A named list of reactives:

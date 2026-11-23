@@ -109,16 +109,26 @@ estimate_resources <- function(
   }
   checkmate::assert_int(cpus_per_task, lower = 1L)
   checkmate::assert_number(parallel_efficiency, lower = 0.01, upper = 1.0)
-  if (!is.null(partition)) checkmate::assert_string(partition, min.chars = 1L)
-  if (!is.null(account)) checkmate::assert_string(account, min.chars = 1L)
-  if (!is.null(qos)) checkmate::assert_string(qos, min.chars = 1L)
+  if (!is.null(partition)) sp_assert_safe_slurm_token(partition, arg = "partition")
+  if (!is.null(account)) sp_assert_safe_slurm_token(account, arg = "account")
+  if (!is.null(qos)) sp_assert_safe_slurm_token(qos, arg = "qos")
   if (!is.null(max_concurrent)) checkmate::assert_int(max_concurrent, lower = 1L)
 
   s <- pilot$summary
   if (is.null(s$n_ok) || s$n_ok < 1L) {
-    cli::cli_abort(
-      "Cannot estimate resources from a micro-pilot with 0 successful trials."
-    )
+    err_msgs <- unique(stats::na.omit(pilot$trials$error))
+    cli::cli_abort(c(
+      "Cannot estimate resources from a micro-pilot with 0 successful trials ({s$n_failed %||% nrow(pilot$trials)} failed, {s$n_timeout %||% 0L} timed out, {s$n_oom_suspect %||% 0L} OOM suspect).",
+      if (length(err_msgs) > 0L) c("x" = "Sample pilot error: {err_msgs[[1L]]}")
+    ))
+  }
+
+  # Collect raw successful execution times for robust heavy-tailed modeling
+  ok_trials <- pilot$trials[pilot$trials$status == "OK", , drop = FALSE]
+  exec_raw <- ok_trials$exec_sec
+  exec_raw <- exec_raw[!is.na(exec_raw) & is.finite(exec_raw)]
+  if (length(exec_raw) == 0L) {
+    exec_raw <- max(1e-5, s$exec_mean_sec %||% 1e-3)
   }
 
   # 1. CPU scaling via Amdahl's law
@@ -128,17 +138,38 @@ estimate_resources <- function(
   speedup <- ((1 - eta) + eta / c0) / ((1 - eta) + eta / c_req)
 
   t0 <- if (is.na(s$startup_median_sec)) 0 else max(0, s$startup_median_sec)
-  mu_t <- max(1e-4, s$exec_mean_sec) / speedup
-  sd_t <- if (is.na(s$exec_sd_sec) || s$exec_sd_sec <= 0) {
-    0.25 * mu_t
-  } else {
-    s$exec_sd_sec / speedup
-  }
-  q90_t <- max(mu_t, (s$exec_q90_sec %||% s$exec_mean_sec) / speedup)
+  exec_scaled <- pmax(exec_raw, 1e-5) / speedup
+  n_ok <- length(exec_scaled)
 
-  # 2. Optimal chunk size
+  mu_t <- mean(exec_scaled)
+  sd_t <- if (n_ok >= 2L && is.finite(stats::sd(exec_scaled)) && stats::sd(exec_scaled) > 0) {
+    stats::sd(exec_scaled)
+  } else {
+    0.25 * mu_t
+  }
+  q_vals <- stats::quantile(exec_scaled, probs = c(0.50, 0.75, 0.90, 0.95), names = FALSE)
+  q50_t <- q_vals[[1L]]
+  q75_t <- q_vals[[2L]]
+  q90_t <- max(mu_t, q_vals[[3L]])
+  q95_t <- max(q90_t, q_vals[[4L]])
+  max_t <- max(exec_scaled)
+
+  # Sub-millisecond and heavy-tail diagnostics
+  sub_ms <- isTRUE(q50_t < 1e-3)
+  log_exec <- log(exec_scaled)
+  log_mu <- mean(log_exec)
+  log_sd_raw <- if (n_ok >= 2L) stats::sd(log_exec) else 0.25
+  if (!is.finite(log_sd_raw) || log_sd_raw <= 0) log_sd_raw <- 0.25
+  # Cap log_sd to avoid numerical explosion on tiny samples while preserving heavy tails
+  log_sd <- min(log_sd_raw, 2.0)
+  skew_ratio <- max_t / max(q50_t, 1e-5)
+  is_heavy_tailed <- isTRUE(skew_ratio >= 2.5) || isTRUE(log_sd_raw >= 0.75)
+
+  # 2. Optimal chunk size (overflow-safe for sub-millisecond tasks)
   target_sec <- target_chunk_minutes * 60
-  k_time <- max(1L, as.integer(floor(max(1, target_sec - t0) / max(mu_t, 1e-3))))
+  eff_unit_sec <- max(mu_t, 1e-5)
+  k_time_dbl <- floor(max(1, target_sec - t0) / eff_unit_sec)
+  k_time <- as.integer(max(1, min(as.numeric(n_tasks), k_time_dbl)))
   k_cap <- as.integer(ceiling(n_tasks / max_array_size))
   k_upper <- min(n_tasks, max_chunk_size %||% n_tasks)
   k_lower <- min(min_chunk_size, n_tasks)
@@ -146,14 +177,31 @@ estimate_resources <- function(
   chunk_size <- as.integer(max(k_lower, min(k_upper, max(k_time, k_cap))))
   n_chunks <- as.integer(ceiling(n_tasks / chunk_size))
 
-  # 3. Walltime prediction & safety margin
-  df <- max(1L, as.integer(s$n_ok) - 1L)
+  # 3. Robust walltime prediction: max(CLT, Fenton-Wilkinson Log-Normal, Nonparametric tail)
+  df <- max(1L, as.integer(n_ok) - 1L)
   z_tail <- min(3.5, max(2.326, stats::qt(0.99, df = df)))
   expected_chunk_sec <- t0 + chunk_size * mu_t
-  pred_chunk_sec <- max(
-    t0 + chunk_size * mu_t + z_tail * sqrt(chunk_size) * sd_t,
-    t0 + chunk_size * q90_t
-  )
+
+  # (a) Normal CLT sum upper bound
+  pred_clt_exec <- chunk_size * mu_t + z_tail * sqrt(chunk_size) * sd_t
+
+  # (b) Fenton-Wilkinson log-normal sum approximation for skewed positive runtimes
+  ln_mean_1 <- exp(log_mu + 0.5 * log_sd^2)
+  ln_cv2_1 <- exp(log_sd^2) - 1
+  ln_sum_mean <- chunk_size * ln_mean_1
+  ln_sum_sigma2 <- log(1 + ln_cv2_1 / chunk_size)
+  ln_sum_mu <- log(ln_sum_mean) - 0.5 * ln_sum_sigma2
+  pred_ln_exec <- exp(ln_sum_mu + z_tail * sqrt(ln_sum_sigma2))
+  # Guard against pathological small-sample log-normal extrapolation (> 5x worst-case linear)
+  pred_ln_exec <- min(pred_ln_exec, 5 * chunk_size * max_t)
+
+  # (c) Nonparametric order-statistic protection (survives worst observed spike + rest at q75, or q95 linear)
+  pred_np_exec <- max(chunk_size * q95_t, max_t + (chunk_size - 1) * q75_t)
+
+  candidates <- c(clt = pred_clt_exec, lognormal = pred_ln_exec, nonparametric = pred_np_exec)
+  dominant_idx <- which.max(candidates)
+  dominant_model <- names(candidates)[[dominant_idx]]
+  pred_chunk_sec <- t0 + candidates[[dominant_idx]]
   overhead_ratio <- if (expected_chunk_sec > 0) t0 / expected_chunk_sec else 0
 
   req_minutes_raw <- max(time_min_minutes, (time_safety * pred_chunk_sec) / 60)
@@ -172,6 +220,38 @@ estimate_resources <- function(
 
   mem_mb <- as.integer(sp_ceil_to(max(mem_min_mb, mem_safety * pred_mem_mb), mem_round_mb))
 
+  # Collect actionable pilot recovery / accuracy diagnostics
+  diag_warnings <- character(0L)
+  fail_rate <- s$failure_rate %||% 0
+  if (is.finite(fail_rate) && fail_rate > 0) {
+    diag_warnings <- c(
+      diag_warnings,
+      sprintf(
+        "Micro-pilot experienced %.0f%% failure rate (%d/%d failed; timeout=%d, oom_suspect=%d); consider increasing mem_safety/time_safety or inspecting pilot$trials$error.",
+        100 * fail_rate, s$n_failed %||% 0L, s$n_trials %||% n_ok,
+        s$n_timeout %||% 0L, s$n_oom_suspect %||% 0L
+      )
+    )
+  }
+  if (is_heavy_tailed) {
+    diag_warnings <- c(
+      diag_warnings,
+      sprintf(
+        "Right-skewed / heavy-tailed pilot runtimes detected (max/median = %.1fx, log-SD = %.2f); using %s upper-tail walltime bound.",
+        skew_ratio, log_sd_raw, dominant_model
+      )
+    )
+  }
+  if (sub_ms && overhead_ratio > 0.25) {
+    diag_warnings <- c(
+      diag_warnings,
+      sprintf(
+        "Sub-millisecond tasks detected (median %.4fs) with %.0f%% worker startup overhead; consider increasing chunk_size.",
+        q50_t, 100 * overhead_ratio
+      )
+    )
+  }
+
   res <- resource_spec(
     n_tasks = n_tasks,
     chunk_size = chunk_size,
@@ -186,17 +266,28 @@ estimate_resources <- function(
 
   res$estimates <- list(
     source = "micro_pilot",
-    n_pilot_ok = s$n_ok,
+    n_pilot_ok = n_ok,
+    pilot_failure_rate = fail_rate,
     startup_sec = t0,
     per_task_mean_sec = mu_t,
     per_task_sd_sec = sd_t,
     per_task_q90_sec = q90_t,
+    per_task_q95_sec = q95_t,
+    per_task_max_sec = max_t,
     cpu_speedup = speedup,
     expected_chunk_sec = expected_chunk_sec,
     predicted_chunk_sec = pred_chunk_sec,
+    pred_clt_sec = t0 + pred_clt_exec,
+    pred_lognormal_sec = t0 + pred_ln_exec,
+    pred_nonparametric_sec = t0 + pred_np_exec,
+    dominant_model = dominant_model,
+    is_heavy_tailed = is_heavy_tailed,
+    skewness_ratio = skew_ratio,
+    sub_millisecond = sub_ms,
     overhead_ratio = overhead_ratio,
     predicted_peak_rss_mb = pred_mem_mb,
-    total_cpu_hours = (n_chunks * expected_chunk_sec * cpus_per_task) / 3600
+    total_cpu_hours = (n_chunks * expected_chunk_sec * cpus_per_task) / 3600,
+    diagnostics = diag_warnings
   )
   res$assumptions <- list(
     target_chunk_minutes = target_chunk_minutes,
@@ -249,9 +340,9 @@ resource_spec <- function(
   checkmate::assert_number(mem_mb, lower = 16, finite = TRUE)
   checkmate::assert_number(time_minutes, lower = 1 / 60, finite = TRUE)
   checkmate::assert_int(cpus_per_task, lower = 1L)
-  if (!is.null(partition)) checkmate::assert_string(partition, min.chars = 1L)
-  if (!is.null(account)) checkmate::assert_string(account, min.chars = 1L)
-  if (!is.null(qos)) checkmate::assert_string(qos, min.chars = 1L)
+  if (!is.null(partition)) sp_assert_safe_slurm_token(partition, arg = "partition")
+  if (!is.null(account)) sp_assert_safe_slurm_token(account, arg = "account")
+  if (!is.null(qos)) sp_assert_safe_slurm_token(qos, arg = "qos")
   if (!is.null(max_concurrent)) checkmate::assert_int(max_concurrent, lower = 1L)
 
   chunk_size <- min(as.integer(chunk_size), as.integer(n_tasks))

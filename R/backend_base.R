@@ -138,22 +138,66 @@ sp_simplify_results <- function(values) {
   values
 }
 
-sp_collect_checkpoints <- function(work_dir, resources, simplify = FALSE, allow_partial = FALSE) {
+sp_collect_checkpoints <- function(
+  work_dir,
+  resources,
+  simplify = FALSE,
+  allow_partial = FALSE,
+  verify_checksum = TRUE
+) {
   n_tasks <- resources$n_tasks
   n_chunks <- resources$n_chunks
   out <- vector("list", n_tasks)
   missing_chunks <- integer(0L)
+  corrupt_chunks <- character(0L)
   failed_tasks <- integer(0L)
 
+  results_dir <- file.path(work_dir, "results")
+  status_dir <- file.path(work_dir, "status")
+
   for (cid in seq_len(n_chunks)) {
-    res_path <- file.path(work_dir, "results", sprintf("chunk_%04d.rds", cid))
+    res_path <- file.path(results_dir, sprintf("chunk_%04d.rds", cid))
+    sp_assert_path_confined(res_path, work_dir, arg = "checkpoint_path")
+
     if (!file.exists(res_path)) {
       missing_chunks <- c(missing_chunks, cid)
       next
     }
-    chunk_obj <- readRDS(res_path)
+
+    expected_sha <- NULL
+    st_path <- file.path(status_dir, sprintf("chunk_%04d.json", cid))
+    if (isTRUE(verify_checksum) && file.exists(st_path)) {
+      sp_assert_path_confined(st_path, work_dir, arg = "status_path")
+      st_json <- tryCatch(jsonlite::fromJSON(st_path, simplifyVector = TRUE), error = function(e) NULL)
+      if (!is.null(st_json) && !is.null(st_json$checkpoint_sha256) &&
+          !is.na(st_json$checkpoint_sha256) && nzchar(st_json$checkpoint_sha256)) {
+        expected_sha <- as.character(st_json$checkpoint_sha256)
+      }
+    }
+
+    check <- verify_checkpoint(
+      result_path = res_path,
+      expected_sha256 = if (isTRUE(verify_checksum)) expected_sha else NULL,
+      require_sidecar = FALSE
+    )
+
+    if (!isTRUE(check$ok)) {
+      corrupt_chunks <- c(corrupt_chunks, sprintf("chunk %d (%s)", cid, check$reason))
+      next
+    }
+
+    chunk_obj <- check$object
+    if (!is.list(chunk_obj) || is.null(chunk_obj$results)) {
+      corrupt_chunks <- c(corrupt_chunks, sprintf("chunk %d (malformed checkpoint structure)", cid))
+      next
+    }
+
     for (item in chunk_obj$results) {
       tid <- as.integer(item$task_index)
+      if (is.na(tid) || tid < 1L || tid > n_tasks) {
+        corrupt_chunks <- c(corrupt_chunks, sprintf("chunk %d (out-of-range task index %s)", cid, as.character(tid)))
+        next
+      }
       if (isTRUE(item$ok)) {
         out[[tid]] <- item$value
       } else {
@@ -164,6 +208,20 @@ sp_collect_checkpoints <- function(work_dir, resources, simplify = FALSE, allow_
           NULL
         }
       }
+    }
+  }
+
+  if (length(corrupt_chunks) > 0L) {
+    if (!isTRUE(allow_partial)) {
+      cli::cli_abort(c(
+        "Checkpoint integrity check failed for {length(corrupt_chunks)} chunk{?s}:",
+        "x" = "{paste(corrupt_chunks, collapse = '; ')}",
+        "i" = "Run {.code slurm_retry(job)} to recompute corrupted chunks cleanly."
+      ))
+    } else {
+      cli::cli_warn(
+        "Skipping {length(corrupt_chunks)} corrupted chunk checkpoint{?s}: {paste(corrupt_chunks, collapse = '; ')}."
+      )
     }
   }
 

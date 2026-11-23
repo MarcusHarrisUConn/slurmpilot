@@ -140,6 +140,7 @@ mod_hpc_submit_server <- function(
   async_pilot = TRUE
 ) {
   sp_check_shiny_deps()
+  poll_ms <- sp_clamp_int(poll_ms, default = 150L, lower = 50L, upper = 60000L)
 
   resolve_val <- function(x) {
     if (shiny::is.reactive(x)) x() else x
@@ -167,7 +168,7 @@ mod_hpc_submit_server <- function(
 
     cleanup_pilot_state <- function() {
       if (!is.null(pilot_state$proc)) {
-        try(pilot_state$proc$kill_tree(), silent = TRUE)
+        sp_kill_and_reap(pilot_state$proc)
         pilot_state$proc <- NULL
       }
       if (!is.null(pilot_state$tmp_dir) && dir.exists(pilot_state$tmp_dir)) {
@@ -196,7 +197,8 @@ mod_hpc_submit_server <- function(
           arg = p$args_list[[task_idx]],
           packages = p$packages,
           globals = p$globals,
-          task_seed = task_seed,
+          task_seed = p$seed,
+          task_index = task_idx,
           cpus_per_task = p$cpus_per_task
         ),
         file = payload_path
@@ -339,12 +341,12 @@ mod_hpc_submit_server <- function(
         return()
       }
 
-      n_tasks <- max(1L, as.integer(input$n_tasks %||% 10L))
-      n_pilot <- max(1L, min(n_tasks, as.integer(input$n_pilot %||% 3L)))
-      max_chunk <- max(1L, as.integer(input$max_chunk_size %||% 4L))
-      cpus <- max(1L, as.integer(input$cpus_per_task %||% 1L))
-      mem_s <- max(1.0, as.numeric(input$mem_safety %||% 1.35))
-      time_s <- max(1.0, as.numeric(input$time_safety %||% 1.50))
+      n_tasks <- sp_clamp_int(input$n_tasks, default = 10L, lower = 1L, upper = 1000000L)
+      n_pilot <- sp_clamp_int(input$n_pilot, default = 3L, lower = 1L, upper = min(n_tasks, 50L))
+      max_chunk <- sp_clamp_int(input$max_chunk_size, default = 4L, lower = 1L, upper = n_tasks)
+      cpus <- sp_clamp_int(input$cpus_per_task, default = 1L, lower = 1L, upper = 256L)
+      mem_s <- sp_clamp_num(input$mem_safety, default = 1.35, lower = 1.0, upper = 10.0)
+      time_s <- sp_clamp_num(input$time_safety, default = 1.50, lower = 1.0, upper = 10.0)
 
       builder <- resolve_val(args_builder)
       cur_args <- builder(n_tasks)
@@ -407,12 +409,12 @@ mod_hpc_submit_server <- function(
     })
 
     shiny::observeEvent(input$submit_job, {
-      n_tasks <- max(1L, as.integer(input$n_tasks %||% 10L))
-      max_chunk <- max(1L, as.integer(input$max_chunk_size %||% 4L))
-      cpus <- max(1L, as.integer(input$cpus_per_task %||% 1L))
-      mem_s <- max(1.0, as.numeric(input$mem_safety %||% 1.35))
-      time_s <- max(1.0, as.numeric(input$time_safety %||% 1.50))
-      jname <- sp_sanitize_name(input$job_name %||% "slurmpilot_study")
+      n_tasks <- sp_clamp_int(input$n_tasks, default = 10L, lower = 1L, upper = 1000000L)
+      max_chunk <- sp_clamp_int(input$max_chunk_size, default = 4L, lower = 1L, upper = n_tasks)
+      cpus <- sp_clamp_int(input$cpus_per_task, default = 1L, lower = 1L, upper = 256L)
+      mem_s <- sp_clamp_num(input$mem_safety, default = 1.35, lower = 1.0, upper = 10.0)
+      time_s <- sp_clamp_num(input$time_safety, default = 1.50, lower = 1.0, upper = 10.0)
+      jname <- sp_sanitize_name(input$job_name, default = "slurmpilot_study")
 
       builder <- resolve_val(args_builder)
       cur_args <- builder(n_tasks)
@@ -498,10 +500,13 @@ mod_hpc_submit_server <- function(
 
       htmltools::div(
         class = "alert alert-light border mt-2 mb-0 py-2 px-3 small",
-        htmltools::div(htmltools::strong("Resource Plan: "), paste(res$slurm_flags, collapse = " ")),
+        htmltools::div(htmltools::strong("Resource Plan: "), sp_escape_ui_text(paste(res$slurm_flags, collapse = " "), 400L)),
         htmltools::div(
           class = "text-muted mt-1",
-          sprintf("%d tasks -> %d chunks (%d tasks/chunk). %s", res$n_tasks, res$n_chunks, res$chunk_size, pilot_detail)
+          sp_escape_ui_text(
+            sprintf("%d tasks -> %d chunks (%d tasks/chunk). %s", res$n_tasks, res$n_chunks, res$chunk_size, pilot_detail),
+            500L
+          )
         )
       )
     })

@@ -24,12 +24,15 @@ build_ssh_args <- function(
   ssh_options = character(),
   remote_cmd
 ) {
-  checkmate::assert_string(host, min.chars = 1L)
-  if (!is.null(user)) checkmate::assert_string(user, min.chars = 1L)
+  sp_assert_safe_ssh_host(host, arg = "host")
+  if (!is.null(user)) sp_assert_safe_ssh_user(user, arg = "user")
   checkmate::assert_int(port, lower = 1L, upper = 65535L)
-  if (!is.null(ssh_key)) checkmate::assert_string(ssh_key, min.chars = 1L)
-  checkmate::assert_character(ssh_options, any.missing = FALSE)
+  if (!is.null(ssh_key)) {
+    sp_assert_safe_path(ssh_key, arg = "ssh_key", allow_tilde = TRUE, allow_relative = TRUE)
+  }
+  sp_assert_safe_ssh_options(ssh_options, arg = "ssh_options")
   checkmate::assert_string(remote_cmd, min.chars = 1L)
+  sp_assert_no_control_chars(remote_cmd, arg = "remote_cmd")
 
   target <- if (!is.null(user)) paste0(user, "@", host) else host
   args <- c(
@@ -43,7 +46,7 @@ build_ssh_args <- function(
   if (length(ssh_options) > 0L) {
     args <- c(args, ssh_options)
   }
-  c(args, target, remote_cmd)
+  c(args, "--", target, remote_cmd)
 }
 
 #' Build Safe Non-Interactive SCP Command Arguments
@@ -72,10 +75,28 @@ build_scp_args <- function(
   recursive = FALSE
 ) {
   checkmate::assert_character(src, min.len = 1L, any.missing = FALSE)
+  sp_assert_no_control_chars(src, arg = "src")
+  for (s in src) {
+    if (startsWith(s, "-")) {
+      cli::cli_abort("SCP source {.arg src} must not start with '-' (option injection guard): {.val {s}}.")
+    }
+    if (grepl("(^|[/\\\\])\\.\\.([/\\\\]|$)", s)) {
+      cli::cli_abort("Path traversal ('..') is forbidden in SCP {.arg src}: {.val {s}}.")
+    }
+  }
   checkmate::assert_string(dest, min.chars = 1L)
+  sp_assert_no_control_chars(dest, arg = "dest")
+  if (startsWith(dest, "-")) {
+    cli::cli_abort("SCP destination {.arg dest} must not start with '-' (option injection guard): {.val {dest}}.")
+  }
+  if (grepl("(^|[/\\\\])\\.\\.([/\\\\]|$)", dest)) {
+    cli::cli_abort("Path traversal ('..') is forbidden in SCP {.arg dest}: {.val {dest}}.")
+  }
   checkmate::assert_int(port, lower = 1L, upper = 65535L)
-  if (!is.null(ssh_key)) checkmate::assert_string(ssh_key, min.chars = 1L)
-  checkmate::assert_character(ssh_options, any.missing = FALSE)
+  if (!is.null(ssh_key)) {
+    sp_assert_safe_path(ssh_key, arg = "ssh_key", allow_tilde = TRUE, allow_relative = TRUE)
+  }
+  sp_assert_safe_ssh_options(ssh_options, arg = "ssh_options")
   checkmate::assert_flag(recursive)
 
   args <- c(
@@ -92,7 +113,7 @@ build_scp_args <- function(
   if (length(ssh_options) > 0L) {
     args <- c(args, ssh_options)
   }
-  c(args, src, dest)
+  c(args, "--", src, dest)
 }
 
 #' Parse SLURM `sbatch` Output to Extract Job ID
@@ -326,8 +347,7 @@ parse_sacct_output <- function(stdout) {
 #' build_scancel_command("482910")
 #' build_scancel_command("482910", chunks = c(2, 5))
 build_scancel_command <- function(slurm_job_id, chunks = NULL) {
-  jid <- as.character(slurm_job_id)
-  checkmate::assert_string(jid, min.chars = 1L)
+  jid <- sp_assert_safe_slurm_job_id(slurm_job_id, arg = "slurm_job_id", allow_dry_run = FALSE)
   if (is.null(chunks)) {
     return(paste("scancel", jid))
   }
@@ -420,18 +440,22 @@ SlurmSshBackend <- R6::R6Class(
       dry_run = FALSE,
       command_runner = NULL
     ) {
-      checkmate::assert_string(host, min.chars = 1L)
-      if (!is.null(user)) checkmate::assert_string(user, min.chars = 1L)
-      checkmate::assert_string(remote_dir, min.chars = 1L)
+      sp_assert_safe_ssh_host(host, arg = "host")
+      if (!is.null(user)) sp_assert_safe_ssh_user(user, arg = "user")
+      sp_assert_safe_path(remote_dir, arg = "remote_dir", allow_tilde = TRUE, allow_relative = FALSE)
       checkmate::assert_int(port, lower = 1L, upper = 65535L)
-      if (!is.null(ssh_key)) checkmate::assert_string(ssh_key, min.chars = 1L)
-      checkmate::assert_character(ssh_options, any.missing = FALSE)
-      if (!is.null(partition)) checkmate::assert_string(partition, min.chars = 1L)
-      if (!is.null(account)) checkmate::assert_string(account, min.chars = 1L)
-      if (!is.null(qos)) checkmate::assert_string(qos, min.chars = 1L)
-      if (!is.null(container_sif)) checkmate::assert_string(container_sif, min.chars = 1L)
-      checkmate::assert_character(container_binds, any.missing = FALSE)
-      checkmate::assert_character(modules, any.missing = FALSE)
+      if (!is.null(ssh_key)) {
+        sp_assert_safe_path(ssh_key, arg = "ssh_key", allow_tilde = TRUE, allow_relative = TRUE)
+      }
+      sp_assert_safe_ssh_options(ssh_options, arg = "ssh_options")
+      if (!is.null(partition)) sp_assert_safe_slurm_token(partition, arg = "partition")
+      if (!is.null(account)) sp_assert_safe_slurm_token(account, arg = "account")
+      if (!is.null(qos)) sp_assert_safe_slurm_token(qos, arg = "qos")
+      if (!is.null(container_sif)) {
+        sp_assert_safe_path(container_sif, arg = "container_sif", allow_tilde = FALSE, allow_relative = FALSE)
+      }
+      sp_assert_safe_apptainer_bind(container_binds, arg = "container_binds")
+      sp_assert_safe_module_name(modules, arg = "modules")
       checkmate::assert_flag(dry_run)
       if (!is.null(command_runner)) checkmate::assert_function(command_runner)
 
@@ -577,7 +601,14 @@ SlurmSshBackend <- R6::R6Class(
         return(sp_build_status(rec$job_id, rec$job_name, self$name, chunks_tbl))
       }
 
-      id_csv <- paste(unique(rec$slurm_ids), collapse = ",")
+      safe_ids <- vapply(
+        unique(rec$slurm_ids),
+        sp_assert_safe_slurm_job_id,
+        character(1L),
+        arg = "slurm_ids",
+        USE.NAMES = FALSE
+      )
+      id_csv <- paste(safe_ids, collapse = ",")
       sq_cmd <- sprintf("squeue -j %s -h -o '%%i|%%T|%%M|%%N|%%r'", id_csv)
       sa_cmd <- sprintf("sacct -j %s -n -P --format=JobID,State,Elapsed,MaxRSS,ExitCode", id_csv)
 
@@ -720,12 +751,14 @@ SlurmSshBackend <- R6::R6Class(
       checkmate::assert_class(job, "slurmpilot_job")
       rec <- private$get_job_record(job$job_id)
 
+      if (isTRUE(self$dry_run)) {
+        return(invisible(self$status(job)))
+      }
+
       if (is.null(chunks)) {
         for (sjid in unique(rec$slurm_ids)) {
           cmd <- build_scancel_command(sjid)
-          if (!isTRUE(self$dry_run)) {
-            private$exec_ssh(cmd)
-          }
+          private$exec_ssh(cmd)
         }
       } else {
         checkmate::assert_integerish(chunks, lower = 1L, upper = rec$resources$n_chunks, min.len = 1L)
@@ -733,9 +766,7 @@ SlurmSshBackend <- R6::R6Class(
         for (sjid in unique(sub_map$slurm_job_id)) {
           cids <- sub_map$chunk_id[sub_map$slurm_job_id == sjid]
           cmd <- build_scancel_command(sjid, chunks = cids)
-          if (!isTRUE(self$dry_run)) {
-            private$exec_ssh(cmd)
-          }
+          private$exec_ssh(cmd)
         }
       }
 
@@ -810,6 +841,7 @@ SlurmSshBackend <- R6::R6Class(
     },
 
     get_job_record = function(job_id) {
+      sp_assert_safe_id(job_id, arg = "job_id")
       rec <- private$jobs[[job_id]]
       if (is.null(rec)) {
         cli::cli_abort("Unknown SLURM SSH job ID: {.val {job_id}}.")

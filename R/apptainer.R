@@ -72,7 +72,41 @@ build_apptainer_def <- function(
   checkmate::assert_character(extra_post, any.missing = FALSE)
 
   r_ver <- r_version %||% env$r_version
+  sp_assert_safe_version(r_ver, arg = "r_version")
   from_img <- base_image %||% paste0("rocker/r-ver:", r_ver)
+  sp_assert_safe_docker_image(from_img, arg = "base_image")
+  sp_assert_safe_version(cmdstan_version, arg = "cmdstan_version")
+  sp_assert_safe_url(cran_repo, arg = "cran_repo")
+  sp_assert_safe_relpath(image_name, arg = "image_name")
+  if (!is.null(output_path)) {
+    sp_assert_no_control_chars(output_path, arg = "output_path")
+    if (grepl("(^|[/\\\\])\\.\\.([/\\\\]|$)", output_path)) {
+      cli::cli_abort("Path traversal ('..') is forbidden in {.arg output_path}: {.val {output_path}}.")
+    }
+  }
+  if (nrow(env$packages) > 0L) {
+    sp_assert_safe_r_package(env$packages$package, arg = "env$packages")
+  }
+  if (length(extra_apt) > 0L) {
+    sp_assert_safe_apt_package(extra_apt, arg = "extra_apt")
+  }
+  if (length(extra_post) > 0L) {
+    sp_assert_safe_apptainer_post(extra_post, arg = "extra_post")
+  }
+  if (length(labels) > 0L) {
+    checkmate::assert_named(labels, type = "unique")
+    sp_assert_safe_env_name(names(labels), arg = "labels")
+    for (nm in names(labels)) {
+      sp_assert_no_control_chars(as.character(labels[[nm]]), arg = paste0("labels$", nm))
+    }
+  }
+  if (length(env$env_vars) > 0L) {
+    sp_assert_safe_env_name(names(env$env_vars), arg = "env$env_vars")
+    for (nm in names(env$env_vars)) {
+      sp_assert_no_control_chars(as.character(env$env_vars[[nm]]), arg = paste0("env$env_vars$", nm))
+    }
+  }
+
   do_cmdstan <- if (is.null(install_cmdstan)) "cmdstan" %in% env$toolchains else isTRUE(install_cmdstan)
   do_renv <- if (is.null(renv_restore)) isTRUE(env$has_renv_lock) else isTRUE(renv_restore)
 
@@ -80,6 +114,7 @@ build_apptainer_def <- function(
   if (do_cmdstan) {
     apt_all <- sort(unique(c(apt_all, "build-essential", "g++", "make", "libtbb-dev", "curl")))
   }
+  sp_assert_safe_apt_package(apt_all, arg = "apt_packages")
 
   # Header
   lines <- c(
@@ -107,6 +142,7 @@ build_apptainer_def <- function(
   # Files (when restoring renv.lock)
   if (do_renv) {
     lock_src <- if (!is.null(env$renv_lock_path)) basename(env$renv_lock_path) else "renv.lock"
+    sp_assert_safe_relpath(lock_src, arg = "renv_lock_path")
     lines <- c(
       lines,
       "%files",
@@ -130,9 +166,13 @@ build_apptainer_def <- function(
   if (do_cmdstan) {
     env_map$CMDSTAN <- "/opt/cmdstan"
   }
+  sp_assert_safe_env_name(names(env_map), arg = "environment")
   lines <- c(lines, "%environment")
   for (nm in names(env_map)) {
-    lines <- c(lines, sprintf("    export %s=%s", nm, as.character(env_map[[nm]])))
+    val_str <- as.character(env_map[[nm]])
+    sp_assert_no_control_chars(val_str, arg = paste0("environment$", nm))
+    formatted_val <- if (grepl("^[A-Za-z0-9_./:-]+$", val_str)) val_str else sp_sh_quote(val_str)
+    lines <- c(lines, sprintf("    export %s=%s", nm, formatted_val))
   }
   lines <- c(lines, "")
 

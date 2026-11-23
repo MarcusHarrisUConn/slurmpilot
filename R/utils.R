@@ -8,19 +8,40 @@ sp_timestamp <- function(time = Sys.time()) {
   format(time, "%Y-%m-%dT%H:%M:%OS3Z", tz = "UTC")
 }
 
+sp_id_counter_env <- new.env(parent = emptyenv())
+sp_id_counter_env$n <- 0L
+
+sp_next_counter <- function() {
+  sp_id_counter_env$n <- sp_id_counter_env$n + 1L
+  sp_id_counter_env$n
+}
+
 sp_generate_id <- function(prefix = "sp") {
   ts <- format(Sys.time(), "%Y%m%d_%H%M%S", tz = "UTC")
-  rand <- substr(digest::digest(list(Sys.time(), Sys.getpid(), stats::runif(1L))), 1L, 6L)
+  # RNG-free entropy so calling slurmpilot never mutates .Random.seed
+  cnt <- sp_next_counter()
+  rand <- substr(
+    digest::digest(list(Sys.time(), proc.time(), Sys.getpid(), cnt), algo = "sha256"),
+    1L, 8L
+  )
   paste0(prefix, "_", ts, "_", rand)
 }
 
 sp_sanitize_name <- function(name, default = "slurmpilot_job") {
-  if (is.null(name) || !nzchar(trimws(name))) {
+  if (is.null(name) || length(name) == 0L || is.na(name[[1L]]) || !nzchar(trimws(as.character(name[[1L]])))) {
     return(default)
   }
-  clean <- gsub("[^A-Za-z0-9_.-]+", "_", trimws(name))
-  clean <- gsub("^_+|_+$", "", clean)
-  if (!nzchar(clean)) default else clean
+  s <- as.character(name[[1L]])
+  # Strip control characters and replace anything outside [A-Za-z0-9_.-]
+  s <- gsub("[\r\n\t[:cntrl:]]", "_", s, perl = TRUE)
+  clean <- gsub("[^A-Za-z0-9_.-]+", "_", trimws(s))
+  # Prevent leading dash/dot (CLI flag injection / hidden dotfile / '..')
+  clean <- gsub("^[._-]+|[._-]+$", "", clean)
+  clean <- gsub("\\.\\.+", "_", clean)
+  if (!nzchar(clean)) {
+    return(default)
+  }
+  substr(clean, 1L, 120L)
 }
 
 #' Format Duration in Seconds as a SLURM Time String
@@ -253,47 +274,49 @@ sp_partition_tasks <- function(n_tasks, chunk_size) {
   )
 }
 
-sp_write_rds_atomic <- function(object, path) {
+sp_atomic_tmp_path <- function(path) {
   dir_path <- dirname(path)
   if (!dir.exists(dir_path)) {
     dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
   }
-  tmp <- file.path(dir_path, paste0(".", basename(path), ".tmp.", Sys.getpid(), ".", sample.int(1e6L, 1L)))
+  file.path(
+    dir_path,
+    sprintf(".%s.tmp.%d.%d", basename(path), Sys.getpid(), sp_next_counter())
+  )
+}
+
+sp_write_rds_atomic <- function(object, path) {
+  tmp <- sp_atomic_tmp_path(path)
+  on.exit(if (file.exists(tmp)) unlink(tmp, force = TRUE), add = TRUE)
   saveRDS(object, file = tmp)
   ok <- file.rename(tmp, path)
   if (!ok) {
     file.copy(tmp, path, overwrite = TRUE)
-    unlink(tmp)
+    unlink(tmp, force = TRUE)
   }
   invisible(path)
 }
 
 sp_write_json_atomic <- function(object, path) {
-  dir_path <- dirname(path)
-  if (!dir.exists(dir_path)) {
-    dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
-  }
-  tmp <- file.path(dir_path, paste0(".", basename(path), ".tmp.", Sys.getpid(), ".", sample.int(1e6L, 1L)))
+  tmp <- sp_atomic_tmp_path(path)
+  on.exit(if (file.exists(tmp)) unlink(tmp, force = TRUE), add = TRUE)
   jsonlite::write_json(object, path = tmp, auto_unbox = TRUE, pretty = TRUE, null = "null", na = "null")
   ok <- file.rename(tmp, path)
   if (!ok) {
     file.copy(tmp, path, overwrite = TRUE)
-    unlink(tmp)
+    unlink(tmp, force = TRUE)
   }
   invisible(path)
 }
 
 sp_write_lines_atomic <- function(lines, path) {
-  dir_path <- dirname(path)
-  if (!dir.exists(dir_path)) {
-    dir.create(dir_path, recursive = TRUE, showWarnings = FALSE)
-  }
-  tmp <- file.path(dir_path, paste0(".", basename(path), ".tmp.", Sys.getpid(), ".", sample.int(1e6L, 1L)))
+  tmp <- sp_atomic_tmp_path(path)
+  on.exit(if (file.exists(tmp)) unlink(tmp, force = TRUE), add = TRUE)
   writeLines(lines, con = tmp, useBytes = TRUE)
   ok <- file.rename(tmp, path)
   if (!ok) {
     file.copy(tmp, path, overwrite = TRUE)
-    unlink(tmp)
+    unlink(tmp, force = TRUE)
   }
   invisible(path)
 }
@@ -321,6 +344,68 @@ sp_process_tree_rss_mb <- function(pid) {
     }, numeric(1L)), na.rm = TRUE)
     rss_bytes / (1024^2)
   }, error = function(e) NA_real_)
+}
+
+sp_kill_and_reap <- function(proc, wait_ms = 1000L) {
+  if (is.null(proc)) return(invisible(FALSE))
+  try(proc$kill_tree(), silent = TRUE)
+  if (isTRUE(tryCatch(proc$is_alive(), error = function(e) FALSE))) {
+    try(proc$kill(), silent = TRUE)
+  }
+  try(proc$wait(timeout = as.integer(wait_ms)), silent = TRUE)
+  invisible(!isTRUE(tryCatch(proc$is_alive(), error = function(e) FALSE)))
+}
+
+#' Derive an Independent `L'Ecuyer-CMRG` Parallel RNG Stream
+#'
+#' Computes the deterministic 7-integer `L'Ecuyer-CMRG` `.Random.seed` vector
+#' for a given `(seed, chunk_id, task_pos)` tuple using base
+#' [parallel::nextRNGStream()] (spacing chunks \eqn{2^{127}} draws apart) and
+#' [parallel::nextRNGSubStream()] (spacing tasks within a chunk \eqn{2^{76}}
+#' draws apart). Restores the caller's `.Random.seed` and `RNGkind()` on exit
+#' so calling this function has zero global RNG side effects.
+#'
+#' @param seed Integer master seed.
+#' @param chunk_id Positive integer array chunk index. Default `1L`.
+#' @param task_pos Positive integer 1-based task position within the chunk.
+#'   Default `1L`.
+#'
+#' @return An integer vector of length 7 representing a valid `L'Ecuyer-CMRG`
+#'   `.Random.seed` state.
+#' @export
+#' @examples
+#' s1 <- slurmpilot_rng_stream(42L, chunk_id = 1L, task_pos = 1L)
+#' s2 <- slurmpilot_rng_stream(42L, chunk_id = 2L, task_pos = 1L)
+#' !identical(s1, s2)
+slurmpilot_rng_stream <- function(seed, chunk_id = 1L, task_pos = 1L) {
+  checkmate::assert_int(seed)
+  checkmate::assert_int(chunk_id, lower = 1L)
+  checkmate::assert_int(task_pos, lower = 1L)
+
+  old_kind <- RNGkind()
+  has_seed <- exists(".Random.seed", envir = globalenv(), inherits = FALSE)
+  old_seed <- if (has_seed) get(".Random.seed", envir = globalenv(), inherits = FALSE) else NULL
+  on.exit({
+    suppressWarnings(RNGkind(kind = old_kind[[1L]], normal.kind = old_kind[[2L]], sample.kind = old_kind[[3L]]))
+    if (has_seed) {
+      assign(".Random.seed", old_seed, envir = globalenv())
+    } else if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
+      rm(".Random.seed", envir = globalenv())
+    }
+  }, add = TRUE)
+
+  RNGkind("L'Ecuyer-CMRG")
+  set.seed(as.integer(seed))
+  s <- get(".Random.seed", envir = globalenv(), inherits = FALSE)
+  for (step in seq_len(as.integer(chunk_id))) {
+    s <- parallel::nextRNGStream(s)
+  }
+  if (task_pos > 1L) {
+    for (step in seq_len(as.integer(task_pos - 1L))) {
+      s <- parallel::nextRNGSubStream(s)
+    }
+  }
+  s
 }
 
 sp_normalize_slurm_state <- function(state) {

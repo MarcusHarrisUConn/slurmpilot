@@ -15,6 +15,7 @@ test_that("SSH/SCP/scancel command builders produce safe expected arguments", {
       "-p", "2222",
       "-i", "~/.ssh/hpc_ed25519",
       "-o", "ServerAliveInterval=60",
+      "--",
       "mharris@login.hpc.edu",
       "sbatch --parsable /scratch/job/submit.sbatch"
     )

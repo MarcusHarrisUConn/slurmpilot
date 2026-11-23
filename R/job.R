@@ -90,13 +90,33 @@ slurm_job_spec <- function(
     )
   }
 
+  if (!is.null(name)) {
+    checkmate::assert_string(name, min.chars = 1L)
+    sp_assert_no_control_chars(name, arg = "name")
+    if (sp_has_shell_metachars(name)) {
+      cli::cli_abort("Unsafe shell metacharacter in job {.arg name}: {.val {name}}.")
+    }
+  }
   checkmate::assert_character(packages, any.missing = FALSE)
+  if (length(packages) > 0L) sp_assert_safe_r_package(packages, arg = "packages")
   checkmate::assert_list(globals)
   if (length(globals) > 0L) checkmate::assert_named(globals, type = "unique")
   if (!is.null(seed)) checkmate::assert_int(seed)
   checkmate::assert_flag(continue_on_error)
-  if (!is.null(container_sif)) checkmate::assert_string(container_sif, min.chars = 1L)
-  checkmate::assert_character(modules, any.missing = FALSE)
+  if (!is.null(container_sif)) {
+    sp_assert_safe_path(container_sif, arg = "container_sif", allow_tilde = FALSE, allow_relative = FALSE)
+  }
+  sp_assert_safe_module_name(modules, arg = "modules")
+  if (length(env_vars) > 0L) {
+    ev_names <- names(env_vars)
+    if (is.null(ev_names) || any(!nzchar(ev_names))) {
+      cli::cli_abort("All entries in {.arg env_vars} must be named.")
+    }
+    sp_assert_safe_env_name(ev_names, arg = "env_vars")
+    for (i in seq_along(env_vars)) {
+      sp_assert_no_control_chars(as.character(env_vars[[i]]), arg = paste0("env_vars$", ev_names[[i]]))
+    }
+  }
 
   structure(
     list(

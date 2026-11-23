@@ -27,7 +27,14 @@ sp_pilot_child_runner <- function(payload_path) {
   }
 
   if (!is.null(payload$task_seed)) {
-    set.seed(payload$task_seed)
+    RNGkind("L'Ecuyer-CMRG")
+    set.seed(as.integer(payload$task_seed))
+    s <- get(".Random.seed", envir = globalenv(), inherits = FALSE)
+    task_idx <- as.integer(payload$task_index %||% 1L)
+    for (step in seq_len(max(1L, task_idx))) {
+      s <- parallel::nextRNGStream(s)
+    }
+    assign(".Random.seed", s, envir = globalenv())
   }
 
   self_rss_mb <- function() {
@@ -118,10 +125,14 @@ sp_summarize_pilot_trials <- function(trials) {
   n_failed <- n_total - n_ok
 
   if (n_ok == 0L) {
+    n_timeout <- sum(trials$status == "TIMEOUT", na.rm = TRUE)
+    n_oom <- sum(grepl("memory|alloc|oom|killed|137", trials$error, ignore.case = TRUE), na.rm = TRUE)
     return(list(
       n_trials = n_total,
       n_ok = 0L,
       n_failed = n_failed,
+      n_timeout = as.integer(n_timeout),
+      n_oom_suspect = as.integer(n_oom),
       failure_rate = if (n_total > 0L) 1 else NA_real_,
       exec_min_sec = NA_real_,
       exec_q50_sec = NA_real_,
@@ -132,6 +143,11 @@ sp_summarize_pilot_trials <- function(trials) {
       exec_mean_sec = NA_real_,
       exec_sd_sec = NA_real_,
       exec_cv = NA_real_,
+      exec_log_mean = NA_real_,
+      exec_log_sd = NA_real_,
+      skewness_ratio = NA_real_,
+      is_heavy_tailed = FALSE,
+      sub_millisecond = FALSE,
       startup_median_sec = NA_real_,
       wall_median_sec = NA_real_,
       baseline_rss_median_mb = NA_real_,
@@ -143,17 +159,30 @@ sp_summarize_pilot_trials <- function(trials) {
   }
 
   exec <- ok$exec_sec
+  exec_pos <- pmax(exec, 1e-5)
   exec_mean <- mean(exec, na.rm = TRUE)
   exec_sd <- if (n_ok >= 2L) stats::sd(exec, na.rm = TRUE) else NA_real_
   exec_cv <- if (!is.na(exec_sd) && exec_mean > 0) exec_sd / exec_mean else NA_real_
 
+  log_exec <- log(exec_pos)
+  exec_log_mean <- mean(log_exec, na.rm = TRUE)
+  exec_log_sd <- if (n_ok >= 2L) stats::sd(log_exec, na.rm = TRUE) else NA_real_
+
   q_exec <- stats::quantile(exec, probs = c(0.50, 0.75, 0.90, 0.95), names = FALSE, na.rm = TRUE)
   peak_q95 <- stats::quantile(ok$peak_rss_mb, probs = 0.95, names = FALSE, na.rm = TRUE)
+  skew_ratio <- max(exec, na.rm = TRUE) / max(q_exec[[1L]], 1e-5)
+  is_heavy <- isTRUE(skew_ratio >= 2.5) || (!is.na(exec_log_sd) && exec_log_sd >= 0.75)
+  is_sub_ms <- isTRUE(q_exec[[1L]] < 1e-3)
+
+  n_timeout <- sum(trials$status == "TIMEOUT", na.rm = TRUE)
+  n_oom <- sum(grepl("memory|alloc|oom|killed|137", trials$error, ignore.case = TRUE), na.rm = TRUE)
 
   list(
     n_trials = n_total,
     n_ok = n_ok,
     n_failed = n_failed,
+    n_timeout = as.integer(n_timeout),
+    n_oom_suspect = as.integer(n_oom),
     failure_rate = n_failed / n_total,
     exec_min_sec = min(exec, na.rm = TRUE),
     exec_q50_sec = q_exec[[1L]],
@@ -164,6 +193,11 @@ sp_summarize_pilot_trials <- function(trials) {
     exec_mean_sec = exec_mean,
     exec_sd_sec = exec_sd,
     exec_cv = exec_cv,
+    exec_log_mean = exec_log_mean,
+    exec_log_sd = exec_log_sd,
+    skewness_ratio = skew_ratio,
+    is_heavy_tailed = is_heavy,
+    sub_millisecond = is_sub_ms,
     startup_median_sec = stats::median(ok$startup_sec, na.rm = TRUE),
     wall_median_sec = stats::median(ok$wall_sec, na.rm = TRUE),
     baseline_rss_median_mb = stats::median(ok$baseline_rss_mb, na.rm = TRUE),
@@ -296,7 +330,8 @@ pilot_run <- function(
           arg = args_list[[task_idx]],
           packages = packages,
           globals = globals,
-          task_seed = task_seed,
+          task_seed = seed,
+          task_index = task_idx,
           cpus_per_task = cpus_per_task
         ),
         file = payload_path
@@ -321,10 +356,13 @@ pilot_run <- function(
         elapsed_now <- proc.time()[["elapsed"]] - t_spawn_mono
         if (elapsed_now > timeout_sec) {
           timed_out <- TRUE
-          try(proc$kill_tree(), silent = TRUE)
+          sp_kill_and_reap(proc)
           break
         }
         Sys.sleep(sample_interval)
+      }
+      if (!timed_out) {
+        try(proc$wait(timeout = 500L), silent = TRUE)
       }
 
       wall_sec <- max(0, proc.time()[["elapsed"]] - t_spawn_mono)
@@ -406,8 +444,13 @@ pilot_run <- function(
         parent_env <- environment(fn_local) %||% globalenv()
         environment(fn_local) <- list2env(globals, parent = parent_env)
       }
-      if (!is.null(task_seed)) {
-        set.seed(task_seed)
+      if (!is.null(seed)) {
+        old_kind_in <- RNGkind()
+        has_seed_in <- exists(".Random.seed", envir = globalenv(), inherits = FALSE)
+        old_seed_in <- if (has_seed_in) get(".Random.seed", envir = globalenv(), inherits = FALSE) else NULL
+        stream_s <- slurmpilot_rng_stream(seed, chunk_id = task_idx, task_pos = 1L)
+        RNGkind("L'Ecuyer-CMRG")
+        assign(".Random.seed", stream_s, envir = globalenv())
       }
       base_rss <- sp_process_tree_rss_mb(Sys.getpid())
       pt0 <- proc.time()
@@ -423,6 +466,14 @@ pilot_run <- function(
           err_msg <<- conditionMessage(e)
         }
       )
+      if (!is.null(seed)) {
+        suppressWarnings(RNGkind(kind = old_kind_in[[1L]], normal.kind = old_kind_in[[2L]], sample.kind = old_kind_in[[3L]]))
+        if (has_seed_in) {
+          assign(".Random.seed", old_seed_in, envir = globalenv())
+        } else if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
+          rm(".Random.seed", envir = globalenv())
+        }
+      }
       pt1 <- proc.time()
       post_rss <- sp_process_tree_rss_mb(Sys.getpid())
       exec_sec <- max(0, as.numeric((pt1 - pt0)[["elapsed"]]))

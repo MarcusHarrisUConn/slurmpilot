@@ -243,9 +243,9 @@ MockSlurmBackend <- R6::R6Class(
       for (cid in chunks) {
         key <- as.character(cid)
         ch <- rec$chunks[[key]]
-        # Kill if still running
+        # Kill and reap if still running
         if (!is.null(rec$procs[[key]])) {
-          try(rec$procs[[key]]$kill_tree(), silent = TRUE)
+          sp_kill_and_reap(rec$procs[[key]])
           rec$procs[[key]] <- NULL
         }
         ch$attempt <- as.integer(ch$attempt + 1L)
@@ -262,9 +262,11 @@ MockSlurmBackend <- R6::R6Class(
         ch$checkpoint_exists <- FALSE
         rec$chunks[[key]] <- ch
 
-        # Remove stale status/partial checkpoint for ONLY the retried chunk
+        # Remove stale status, partial checkpoint, and checksum sidecar for ONLY the retried chunk
+        res_f <- file.path(rec$job_dir, "results", sprintf("chunk_%04d.rds", cid))
         unlink(file.path(rec$job_dir, "status", sprintf("chunk_%04d.json", cid)), force = TRUE)
-        unlink(file.path(rec$job_dir, "results", sprintf("chunk_%04d.rds", cid)), force = TRUE)
+        unlink(res_f, force = TRUE)
+        unlink(paste0(res_f, ".sha256"), force = TRUE)
       }
 
       # Emit retry sbatch script for parity with SLURM workflow
@@ -302,7 +304,7 @@ MockSlurmBackend <- R6::R6Class(
         ch <- rec$chunks[[key]]
         if (ch$state %in% c("PENDING", "RUNNING")) {
           if (!is.null(rec$procs[[key]])) {
-            try(rec$procs[[key]]$kill_tree(), silent = TRUE)
+            sp_kill_and_reap(rec$procs[[key]])
             rec$procs[[key]] <- NULL
           }
           ch$state <- "CANCELLED"
@@ -364,6 +366,22 @@ MockSlurmBackend <- R6::R6Class(
       )
     },
 
+    #' @description Terminate and reap all active background worker processes cleanly.
+    #' @return Integer count of reaped worker processes (invisibly).
+    shutdown = function() {
+      reaped <- 0L
+      for (jid in names(private$jobs)) {
+        rec <- private$jobs[[jid]]
+        for (key in names(rec$procs)) {
+          sp_kill_and_reap(rec$procs[[key]])
+          rec$procs[[key]] <- NULL
+          reaped <- reaped + 1L
+        }
+        private$jobs[[jid]] <- rec
+      }
+      invisible(reaped)
+    },
+
     #' @description Print summary of the local mock backend.
     print = function() {
       n_jobs <- length(private$jobs)
@@ -378,19 +396,16 @@ MockSlurmBackend <- R6::R6Class(
     jobs = list(),
 
     finalize = function() {
-      for (jid in names(private$jobs)) {
-        rec <- private$jobs[[jid]]
-        for (key in names(rec$procs)) {
-          try(rec$procs[[key]]$kill_tree(), silent = TRUE)
-        }
-      }
+      self$shutdown()
     },
 
     get_job_record = function(job_id) {
+      sp_assert_safe_id(job_id, arg = "job_id")
       rec <- private$jobs[[job_id]]
       if (is.null(rec)) {
         cli::cli_abort("Unknown mock SLURM job ID: {.val {job_id}}.")
       }
+      sp_assert_path_confined(rec$job_dir, self$root_dir, arg = "job_dir")
       rec
     },
 
@@ -458,7 +473,7 @@ MockSlurmBackend <- R6::R6Class(
 
             # Check active RSS limit
             if (!is.null(self$mem_limit_mb) && !is.na(ch$peak_rss_mb) && ch$peak_rss_mb > self$mem_limit_mb) {
-              try(proc$kill_tree(), silent = TRUE)
+              sp_kill_and_reap(proc)
               rec$procs[[key]] <- NULL
               ch$state <- "OUT_OF_MEMORY"
               ch$finished_at <- sp_timestamp(now)
@@ -470,7 +485,7 @@ MockSlurmBackend <- R6::R6Class(
               ch$checkpoint_exists <- FALSE
               changed <- TRUE
             } else if (!is.null(self$time_limit_sec) && elapsed > self$time_limit_sec) {
-              try(proc$kill_tree(), silent = TRUE)
+              sp_kill_and_reap(proc)
               rec$procs[[key]] <- NULL
               ch$state <- "TIMEOUT"
               ch$finished_at <- sp_timestamp(now)
@@ -484,33 +499,42 @@ MockSlurmBackend <- R6::R6Class(
             }
             rec$chunks[[key]] <- ch
           } else {
-            # Process finished
+            # Process finished: wait briefly so OS flushes streams/files before reading
+            try(proc$wait(timeout = 500L), silent = TRUE)
             exit_code <- tryCatch(as.integer(proc$get_exit_status()), error = function(e) 1L)
             rec$procs[[key]] <- NULL
+            # Protect terminal CANCELLED chunks against stale transition overwrite
+            if (identical(ch$state, "CANCELLED")) {
+              rec$chunks[[key]] <- ch
+              next
+            }
             elapsed <- max(0, now_mono - ch$started_mono)
             status_path <- file.path(rec$job_dir, "status", sprintf("chunk_%04d.json", cid))
             result_path <- file.path(rec$job_dir, "results", sprintf("chunk_%04d.rds", cid))
 
-            if (file.exists(status_path)) {
-              st_json <- tryCatch(
+            st_json <- if (file.exists(status_path)) {
+              tryCatch(
                 jsonlite::fromJSON(status_path, simplifyVector = TRUE),
                 error = function(e) NULL
               )
-              if (!is.null(st_json)) {
-                ch$state <- sp_normalize_slurm_state(st_json$state %||% "FAILED")
-                ch$finished_at <- as.character(st_json$finished_at %||% sp_timestamp(now))
-                ch$wall_sec <- as.numeric(st_json$wall_sec %||% elapsed)
-                if (!is.null(st_json$peak_rss_mb) && !is.na(st_json$peak_rss_mb)) {
-                  ch$peak_rss_mb <- if (is.na(ch$peak_rss_mb)) {
-                    as.numeric(st_json$peak_rss_mb)
-                  } else {
-                    max(ch$peak_rss_mb, as.numeric(st_json$peak_rss_mb))
-                  }
+            } else {
+              NULL
+            }
+
+            if (!is.null(st_json)) {
+              ch$state <- sp_normalize_slurm_state(st_json$state %||% "FAILED")
+              ch$finished_at <- as.character(st_json$finished_at %||% sp_timestamp(now))
+              ch$wall_sec <- as.numeric(st_json$wall_sec %||% elapsed)
+              if (!is.null(st_json$peak_rss_mb) && !is.na(st_json$peak_rss_mb)) {
+                ch$peak_rss_mb <- if (is.na(ch$peak_rss_mb)) {
+                  as.numeric(st_json$peak_rss_mb)
+                } else {
+                  max(ch$peak_rss_mb, as.numeric(st_json$peak_rss_mb))
                 }
-                ch$exit_code <- as.integer(st_json$exit_code %||% exit_code)
-                ch$error_message <- if (is.null(st_json$error_message)) NA_character_ else as.character(st_json$error_message)
-                ch$checkpoint_exists <- file.exists(result_path)
               }
+              ch$exit_code <- as.integer(st_json$exit_code %||% exit_code)
+              ch$error_message <- if (is.null(st_json$error_message)) NA_character_ else as.character(st_json$error_message)
+              ch$checkpoint_exists <- file.exists(result_path) && isTRUE(verify_checkpoint(result_path)$ok)
             } else {
               ch$finished_at <- sp_timestamp(now)
               ch$wall_sec <- elapsed
@@ -529,7 +553,7 @@ MockSlurmBackend <- R6::R6Class(
                 err_lines <- readLines(err_log, warn = FALSE)
                 ch$error_message <- paste(utils::tail(err_lines, 5L), collapse = "\n")
               }
-              ch$checkpoint_exists <- file.exists(result_path)
+              ch$checkpoint_exists <- file.exists(result_path) && isTRUE(verify_checkpoint(result_path)$ok)
             }
 
             rec$chunks[[key]] <- ch

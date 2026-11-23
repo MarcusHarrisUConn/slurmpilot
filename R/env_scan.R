@@ -318,6 +318,7 @@ scan_project_env <- function(
 
   extra_clean <- unique(setdiff(trimws(extra_packages), c("", sp_base_packages())))
   if (length(extra_clean) > 0L) {
+    sp_assert_safe_r_package(extra_clean, arg = "extra_packages")
     pkg_table <- rbind(
       pkg_table,
       tibble::tibble(

@@ -103,6 +103,10 @@ mod_hpc_monitor_ui <- function(id, title = "Cluster Job Telemetry") {
 #' @param auto_collect Logical; if `TRUE` (default), automatically collects
 #'   ordered results once the job reaches `"COMPLETED"`.
 #' @param simplify Logical passed to [slurm_collect()]. Default `FALSE`.
+#' @param max_retries Positive integer cap on surgical retry button clicks per
+#'   job (clamped to `[1, 50]`). Default `5L`.
+#' @param retry_mem_multiplier Memory scaling multiplier applied when
+#'   `bump_mem` is checked (clamped to `[1.0, 4.0]`). Default `1.5`.
 #'
 #' @return A named list of reactives:
 #'   - `status`: latest `slurmpilot_status` object (or `NULL`).
@@ -117,15 +121,21 @@ mod_hpc_monitor_server <- function(
   job,
   poll_ms = 400L,
   auto_collect = TRUE,
-  simplify = FALSE
+  simplify = FALSE,
+  max_retries = 5L,
+  retry_mem_multiplier = 1.5
 ) {
   sp_check_shiny_deps()
+  poll_ms <- sp_clamp_int(poll_ms, default = 400L, lower = 50L, upper = 60000L)
+  max_retries <- sp_clamp_int(max_retries, default = 5L, lower = 1L, upper = 50L)
+  retry_mem_multiplier <- sp_clamp_num(retry_mem_multiplier, default = 1.5, lower = 1.0, upper = 4.0)
 
   shiny::moduleServer(id, function(input, output, session) {
     active_job_rv <- shiny::reactiveVal(NULL)
     status_rv <- shiny::reactiveVal(NULL)
     results_rv <- shiny::reactiveVal(NULL)
     polling_rv <- shiny::reactiveVal(TRUE)
+    retry_count_rv <- shiny::reactiveVal(0L)
 
     refresh_status <- function(j) {
       if (is.null(j)) {
@@ -151,6 +161,7 @@ mod_hpc_monitor_server <- function(
       j <- job()
       active_job_rv(j)
       results_rv(NULL)
+      retry_count_rv(0L)
       polling_rv(TRUE)
       shiny::updateActionButton(session, "toggle_poll", label = "Pause Polling")
       if (!is.null(j)) {
@@ -165,11 +176,11 @@ mod_hpc_monitor_server <- function(
       }
     }, ignoreNULL = FALSE)
 
-    # Non-blocking self-throttling poll loop
+    # Non-blocking self-throttling poll loop (strictly isolated to prevent reactive loops)
     poll_timer <- shiny::reactiveTimer(poll_ms, session)
     shiny::observe({
       poll_timer()
-      if (!isTRUE(polling_rv())) return()
+      if (!isTRUE(shiny::isolate(polling_rv()))) return()
       j <- shiny::isolate(active_job_rv())
       if (is.null(j)) return()
       cur_st <- shiny::isolate(status_rv())
@@ -177,12 +188,23 @@ mod_hpc_monitor_server <- function(
       refresh_status(j)
     })
 
-    # Surgical retry of failed/OOM/timeout/cancelled chunks
+    # Surgical retry of failed/OOM/timeout/cancelled chunks (with retry cap & memory ceiling)
     shiny::observeEvent(input$retry_failed, {
       j <- active_job_rv()
       if (is.null(j)) return()
-      mem_mult <- if (isTRUE(input$bump_mem)) 1.5 else NULL
+      if (retry_count_rv() >= max_retries) {
+        shiny::showNotification(
+          sprintf("Retry cap (%d) reached for this job.", max_retries),
+          type = "warning"
+        )
+        return()
+      }
+      mem_mult <- if (isTRUE(input$bump_mem)) retry_mem_multiplier else NULL
+      if (!is.null(mem_mult) && j$resources$mem_mb * mem_mult > 1048576) {
+        mem_mult <- NULL
+      }
       j_updated <- slurm_retry(j, mem_multiplier = mem_mult)
+      retry_count_rv(retry_count_rv() + 1L)
       active_job_rv(j_updated)
       results_rv(NULL)
       polling_rv(TRUE)
@@ -305,15 +327,17 @@ mod_hpc_monitor_server <- function(
       rows <- lapply(seq_len(nrow(df)), function(i) {
         wall_str <- if (is.na(df$wall_sec[[i]])) "--" else sprintf("%.2fs", df$wall_sec[[i]])
         rss_str <- if (is.na(df$peak_rss_mb[[i]])) "--" else sprintf("%.1f MB", df$peak_rss_mb[[i]])
-        err_str <- if (is.na(df$error_message[[i]])) "" else df$error_message[[i]]
+        err_str <- sp_escape_ui_text(df$error_message[[i]], max_chars = 300L)
+        state_str <- sp_escape_ui_text(df$state[[i]], max_chars = 32L)
+        worker_str <- if (is.na(df$worker_id[[i]])) "--" else sp_escape_ui_text(df$worker_id[[i]], max_chars = 64L)
         htmltools::tags$tr(
-          htmltools::tags$td(df$chunk_id[[i]]),
-          htmltools::tags$td(df$n_tasks[[i]]),
+          htmltools::tags$td(as.character(df$chunk_id[[i]])),
+          htmltools::tags$td(as.character(df$n_tasks[[i]])),
           htmltools::tags$td(
-            htmltools::span(class = paste("badge", sp_state_badge_class(df$state[[i]])), df$state[[i]])
+            htmltools::span(class = paste("badge", sp_state_badge_class(state_str)), state_str)
           ),
-          htmltools::tags$td(df$attempt[[i]]),
-          htmltools::tags$td(if (is.na(df$worker_id[[i]])) "--" else df$worker_id[[i]]),
+          htmltools::tags$td(as.character(df$attempt[[i]])),
+          htmltools::tags$td(worker_str),
           htmltools::tags$td(wall_str),
           htmltools::tags$td(rss_str),
           htmltools::tags$td(if (isTRUE(df$checkpoint_exists[[i]])) "Saved" else "--"),
@@ -345,17 +369,19 @@ mod_hpc_monitor_server <- function(
 
     output$chunk_log_text <- shiny::renderText({
       j <- active_job_rv()
-      cid <- suppressWarnings(as.integer(input$log_chunk))
+      cid <- sp_clamp_int(input$log_chunk, default = NA_integer_, lower = 1L, upper = if (!is.null(j)) j$resources$n_chunks else 1L)
       st <- status_rv()
       if (is.null(j) || is.na(cid) || is.null(st)) {
         return("No chunk logs available yet.")
       }
       lg <- slurm_logs(j, chunk_id = cid)[[1L]]
+      out_clean <- sp_escape_ui_text(lg$stdout, max_chars = 8000L)
+      err_clean <- sp_escape_ui_text(lg$stderr, max_chars = 8000L)
       paste0(
         "=== STDOUT (chunk ", cid, ") ===\n",
-        if (nzchar(lg$stdout)) lg$stdout else "(empty)",
+        if (nzchar(out_clean)) out_clean else "(empty)",
         "\n\n=== STDERR (chunk ", cid, ") ===\n",
-        if (nzchar(lg$stderr)) lg$stderr else "(empty)"
+        if (nzchar(err_clean)) err_clean else "(empty)"
       )
     })
 

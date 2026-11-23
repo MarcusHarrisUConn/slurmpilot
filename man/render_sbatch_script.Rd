@@ -23,7 +23,8 @@ render_sbatch_script(
 )
 }
 \arguments{
-\item{job_name}{Character SLURM \code{--job-name} (sanitized automatically).}
+\item{job_name}{Character SLURM \code{--job-name} (validated against control
+characters/metacharacters and sanitized).}
 
 \item{resources}{A \code{slurmpilot_resources} object from \code{\link[=estimate_resources]{estimate_resources()}}
 or \code{\link[=resource_spec]{resource_spec()}}.}
@@ -53,15 +54,16 @@ via \verb{module load}.}
 \item{env_vars}{Optional named list or character vector of extra environment
 variables exported in the job script.}
 
-\item{log_dir}{Subdirectory inside \code{work_dir} for SLURM stdout/stderr logs.
-Default \code{"logs"}.}
+\item{log_dir}{Relative subdirectory inside \code{work_dir} for SLURM
+stdout/stderr logs. Default \code{"logs"}.}
 
 \item{mail_user}{Optional email address for \code{--mail-user}.}
 
 \item{mail_type}{Optional SLURM \code{--mail-type} (e.g., \code{"END,FAIL"}).}
 
-\item{extra_sbatch}{Optional character vector of extra raw \verb{#SBATCH} flags
-(without leading \verb{#SBATCH}).}
+\item{extra_sbatch}{Optional character vector of extra \verb{#SBATCH} flags
+(without leading \verb{#SBATCH}; \code{--wrap} and shell metacharacters are
+forbidden).}
 
 \item{output_path}{Optional file path to write the rendered \code{.sbatch} script.}
 }
@@ -72,8 +74,10 @@ and \code{resources}.
 }
 \description{
 Generates a POSIX/bash-safe SLURM batch script configured from a
-\code{slurmpilot_resources} plan (with optional surgical array index overrides,
-Apptainer container execution, environment modules, and structured logging).
+\code{slurmpilot_resources} plan (with strict defense against \verb{#SBATCH} newline,
+shell metacharacter, path traversal, and CLI flag injection). Supports
+surgical array index overrides, Apptainer container execution, environment
+modules, and structured logging.
 }
 \examples{
 res <- resource_spec(n_tasks = 40, chunk_size = 4, mem_mb = 2048, time_minutes = 20)

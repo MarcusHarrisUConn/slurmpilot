@@ -16,15 +16,17 @@ provided, otherwise visibly).
 \description{
 Emits a self-contained R script (\code{worker.R}) that executes one SLURM array
 chunk on a compute node with zero dependency on \code{slurmpilot} itself. The
-worker loads \code{payload.rds} and \code{chunks.rds}, skips chunks that already have
-valid completed checkpoints, runs assigned tasks deterministically, writes
-atomic \code{.rds} result checkpoints and \code{.json} status telemetry, and propagates
-non-zero exit codes on task failure.
+worker loads \code{payload.rds} and \code{chunks.rds}, validates checkpoint SHA-256
+integrity before skipping completed chunks, initializes independent
+\verb{L'Ecuyer-CMRG} per-chunk / per-task parallel RNG streams via base
+\code{\link[parallel:nextRNGStream]{parallel::nextRNGStream()}} and \code{\link[parallel:nextRNGSubStream]{parallel::nextRNGSubStream()}}, writes
+atomic \code{.rds} result checkpoints with \code{.sha256} sidecar digests and \code{.json}
+status telemetry, and propagates non-zero exit codes on task failure.
 }
 \examples{
 script_lines <- render_worker_script()
 head(script_lines, 10)
 }
 \seealso{
-\code{\link[=render_sbatch_script]{render_sbatch_script()}}
+\code{\link[=render_sbatch_script]{render_sbatch_script()}}, \code{\link[=verify_checkpoint]{verify_checkpoint()}}
 }
