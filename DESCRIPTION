@@ -1,0 +1,54 @@
+Package: slurmpilot
+Title: Auto-Profiling SLURM HPC Orchestration and Async Shiny Offloading
+Version: 0.1.0
+Authors@R:
+    person(
+        given = "Marcus",
+        family = "Harris",
+        role = c("aut", "cre", "cph"),
+        email = "marcus.harris.uconn@gmail.com"
+    )
+Description: Eliminates manual 'SLURM' scripting, blind memory and walltime
+    guessing, and 'Shiny' server freezes for compute-heavy R workflows. Runs
+    empirical micro-pilot replications in isolated child processes to measure
+    true peak resident memory and runtime distributions, computes optimal
+    'SLURM' array chunking and resource flags, scans project environments to
+    emit reproducible 'Apptainer' container recipes and batch scripts,
+    orchestrates remote 'SSH'/'SLURM' or local parallel mock-'SLURM' execution
+    with atomic chunk checkpointing and surgical retries, and provides
+    non-blocking 'bslib'/'Shiny' telemetry modules.
+License: MIT + file LICENSE
+URL: https://github.com/MarcusHarrisUConn/slurmpilot
+BugReports: https://github.com/MarcusHarrisUConn/slurmpilot/issues
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+Config/testthat/edition: 3
+Depends:
+    R (>= 4.1.0)
+Imports:
+    R6,
+    callr,
+    checkmate,
+    cli,
+    digest,
+    graphics,
+    jsonlite,
+    processx,
+    ps,
+    rlang,
+    stats,
+    tibble,
+    utils
+Suggests:
+    bslib,
+    ggplot2,
+    grDevices,
+    htmltools,
+    knitr,
+    quarto,
+    rmarkdown,
+    shiny,
+    testthat (>= 3.0.0),
+    withr
+VignetteBuilder: quarto
+Config/roxygen2/version: 8.1.0
