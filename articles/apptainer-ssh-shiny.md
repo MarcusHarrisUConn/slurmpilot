@@ -163,6 +163,12 @@ cat(sb$text)
 #> export SLURMPILOT_WORK_DIR="${WORK_DIR}"
 #> export SLURMPILOT_CHUNK_ID="${SLURM_ARRAY_TASK_ID}"
 #> export SLURMPILOT_ATTEMPT=1
+#> export APPTAINERENV_OMP_NUM_THREADS=2
+#> export APPTAINERENV_OPENBLAS_NUM_THREADS=2
+#> export APPTAINERENV_MKL_NUM_THREADS=2
+#> export APPTAINERENV_SLURMPILOT_WORK_DIR="${WORK_DIR}"
+#> export APPTAINERENV_SLURMPILOT_CHUNK_ID="${SLURM_ARRAY_TASK_ID}"
+#> export APPTAINERENV_SLURMPILOT_ATTEMPT=1
 #> 
 #> echo "[slurmpilot] Starting job ${SLURM_JOB_ID:-local} array task ${SLURM_ARRAY_TASK_ID} on $(hostname)"
 #> apptainer exec --cleanenv --bind '/scratch/researcher/bayesian_dsem:/scratch/researcher/bayesian_dsem' '/scratch/containers/slurmpilot_env.sif' Rscript "${WORK_DIR}/worker.R" --work-dir "${WORK_DIR}" --chunk-id "${SLURM_ARRAY_TASK_ID}" --attempt "1"
@@ -203,10 +209,10 @@ dry_job <- slurm_submit(
 print(dry_job)
 #> 
 #> ── slurmpilot Job Handle
-#> • Job: dry_run_demo (id=slurm_20261124_193340_f5bc4a74, backend=slurm_ssh)
+#> • Job: dry_run_demo (id=slurm_20261124_210639_6e02f7b9, backend=slurm_ssh)
 #> • Chunks: 2 (10 tasks, 2G, 00:15:00)
 #> • Workspace:
-#>   /tmp/RtmpVzeljF/sp_ssh_stage_1d9fdfd092f/slurm_20261124_193340_f5bc4a74
+#>   /tmp/RtmpHVpnUp/sp_ssh_stage_1dc41ada8a9/slurm_20261124_210639_6e02f7b9
 names(dry_job$meta$dry_run_commands)
 #> [1] "mkdir"  "scp"    "sbatch"
 ```
@@ -242,7 +248,7 @@ parse_sacct_output(paste(
 #>   slurm_job_id chunk_id state         elapsed_sec peak_rss_mb exit_code
 #>   <chr>           <int> <chr>               <dbl>       <dbl>     <int>
 #> 1 482910              1 COMPLETED             495        1536         0
-#> 2 482910              2 OUT_OF_MEMORY         130        4096         0
+#> 2 482910              2 OUT_OF_MEMORY         130        4096       253
 
 unlink(c(proj_dir, tmp_stage), recursive = TRUE)
 ```

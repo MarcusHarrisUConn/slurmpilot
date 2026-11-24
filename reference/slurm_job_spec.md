@@ -18,8 +18,10 @@ slurm_job_spec(
   seed = NULL,
   continue_on_error = FALSE,
   container_sif = NULL,
+  container_binds = character(),
   modules = character(),
   env_vars = list(),
+  dependency = NULL,
   warn_bundle_mb = 50
 )
 ```
@@ -68,6 +70,10 @@ slurm_job_spec(
 
   Optional path to Apptainer `.sif` image.
 
+- container_binds:
+
+  Optional character vector of Apptainer `--bind` mounts.
+
 - modules:
 
   Optional character vector of HPC modules to load.
@@ -75,6 +81,10 @@ slurm_job_spec(
 - env_vars:
 
   Optional named list/vector of extra environment variables.
+
+- dependency:
+
+  Optional SLURM `--dependency` string (e.g. `"afterok:12345"`).
 
 - warn_bundle_mb:
 
@@ -90,7 +100,8 @@ An S3 object of class `"slurmpilot_job_spec"`.
 
 [`slurm_submit()`](https://marcusharrisphd.com/slurmpilot/reference/slurm_submit.md),
 [`estimate_resources()`](https://marcusharrisphd.com/slurmpilot/reference/estimate_resources.md),
-[`inspect_job_globals()`](https://marcusharrisphd.com/slurmpilot/reference/inspect_job_globals.md)
+[`inspect_job_globals()`](https://marcusharrisphd.com/slurmpilot/reference/inspect_job_globals.md),
+[`use_rcapsule_container()`](https://marcusharrisphd.com/slurmpilot/reference/use_rcapsule_container.md)
 
 ## Examples
 

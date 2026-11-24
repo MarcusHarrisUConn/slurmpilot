@@ -11,7 +11,7 @@ ready for slurm_submit()."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">slurmpilot</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.5.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -26,6 +26,7 @@ ready for slurm_submit()."></head><body>
     <li><a class="dropdown-item" href="../articles/pilot-to-cluster.html">From Micro-Pilot Profiling to Load-Balanced SLURM Arrays</a></li>
     <li><a class="dropdown-item" href="../articles/apptainer-ssh-shiny.html">Apptainer Packaging, Remote SSH/SLURM &amp; Non-Blocking Shiny Offloading</a></li>
     <li><a class="dropdown-item" href="../articles/troubleshooting-and-retries.html">Troubleshooting, Adaptive Retries &amp; Reproducible Parallel RNG</a></li>
+    <li><a class="dropdown-item" href="../articles/pipelines-and-efficiency.html">Multi-Stage HPC Pipelines, Efficiency Auditing &amp; Container Handoff</a></li>
   </ul></li>
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-pdfs" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">PDFs</button>
@@ -67,8 +68,10 @@ ready for <code><a href="slurm_submit.html">slurm_submit()</a></code>.</p>
 <span>  seed <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  continue_on_error <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  container_sif <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  container_binds <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">character</a></span><span class="op">(</span><span class="op">)</span>,</span>
 <span>  modules <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">character</a></span><span class="op">(</span><span class="op">)</span>,</span>
 <span>  env_vars <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span><span class="op">)</span>,</span>
+<span>  dependency <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  warn_bundle_mb <span class="op">=</span> <span class="fl">50</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
@@ -116,12 +119,21 @@ even if individual tasks error. Default <code>FALSE</code>.</p></dd>
 <dd><p>Optional path to Apptainer <code>.sif</code> image.</p></dd>
 
 
+<dt id="arg-container-binds">container_binds<a class="anchor" aria-label="anchor" href="#arg-container-binds"></a></dt>
+<dd><p>Optional character vector of Apptainer <code>--bind</code> mounts.</p></dd>
+
+
 <dt id="arg-modules">modules<a class="anchor" aria-label="anchor" href="#arg-modules"></a></dt>
 <dd><p>Optional character vector of HPC modules to load.</p></dd>
 
 
 <dt id="arg-env-vars">env_vars<a class="anchor" aria-label="anchor" href="#arg-env-vars"></a></dt>
 <dd><p>Optional named list/vector of extra environment variables.</p></dd>
+
+
+<dt id="arg-dependency">dependency<a class="anchor" aria-label="anchor" href="#arg-dependency"></a></dt>
+<dd><p>Optional SLURM <code>--dependency</code> string (e.g.
+<code>"afterok:12345"</code>).</p></dd>
 
 
 <dt id="arg-warn-bundle-mb">warn_bundle_mb<a class="anchor" aria-label="anchor" href="#arg-warn-bundle-mb"></a></dt>
@@ -136,7 +148,8 @@ emits a diagnostic warning if the serialized payload (<code>fun</code>, closure,
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
-    <div class="dont-index"><p><code><a href="slurm_submit.html">slurm_submit()</a></code>, <code><a href="estimate_resources.html">estimate_resources()</a></code>, <code><a href="inspect_job_globals.html">inspect_job_globals()</a></code></p></div>
+    <div class="dont-index"><p><code><a href="slurm_submit.html">slurm_submit()</a></code>, <code><a href="estimate_resources.html">estimate_resources()</a></code>, <code><a href="inspect_job_globals.html">inspect_job_globals()</a></code>,
+<code><a href="use_rcapsule_container.html">use_rcapsule_container()</a></code></p></div>
     </div>
 
     <div class="section level2">

@@ -119,6 +119,7 @@ run <- slurm_autopilot(
 - [`vignette("pilot-to-cluster", package = "slurmpilot")`](https://marcusharrisphd.com/slurmpilot/articles/pilot-to-cluster.md)
 - [`vignette("apptainer-ssh-shiny", package = "slurmpilot")`](https://marcusharrisphd.com/slurmpilot/articles/apptainer-ssh-shiny.md)
 - [`vignette("troubleshooting-and-retries", package = "slurmpilot")`](https://marcusharrisphd.com/slurmpilot/articles/troubleshooting-and-retries.md)
+- [`vignette("pipelines-and-efficiency", package = "slurmpilot")`](https://marcusharrisphd.com/slurmpilot/articles/pipelines-and-efficiency.md)
 - Architecture & security audit: see `ARCHITECTURE.md` and `SECURITY.md`
 
 ## License

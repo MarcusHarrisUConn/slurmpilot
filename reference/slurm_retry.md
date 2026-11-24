@@ -102,19 +102,19 @@ slurm_wait(job, poll_interval = 0.05)
 #> ── slurmpilot Job Status: slurmpilot_job [PARTIAL_FAILURE] 
 #> • Progress: 1/2 chunks (50%) | running=0, pending=0, failed=0, oom=1,
 #>   timeout=0, cancelled=0
-#> • Peak RSS max: 104.6 MB | Cumulative walltime: 0.98s
+#> • Peak RSS max: 110.1 MB | Cumulative walltime: 0.98s
 job <- slurm_retry(job)
 slurm_wait(job, poll_interval = 0.05)
 #> 
 #> ── slurmpilot Job Status: slurmpilot_job [COMPLETED] 
 #> • Progress: 2/2 chunks (100%) | running=0, pending=0, failed=0, oom=0,
 #>   timeout=0, cancelled=0
-#> • Peak RSS max: 106.9 MB | Cumulative walltime: 0.98s
+#> • Peak RSS max: 110.1 MB | Cumulative walltime: 1.00s
 slurm_retry_history(job)
 #> # A tibble: 1 × 9
 #>   retry_round timestamp             chunk_id trigger_state old_mem_mb new_mem_mb
 #>         <int> <chr>                    <int> <chr>              <int>      <int>
-#> 1           1 2026-11-24T19:33:28.…        2 OUT_OF_MEMORY        512        768
+#> 1           1 2026-11-24T21:06:27.…        2 OUT_OF_MEMORY        512        768
 #> # ℹ 3 more variables: old_time_sec <int>, new_time_sec <int>, adaptive <lgl>
 unlink(be$root_dir, recursive = TRUE)
 ```

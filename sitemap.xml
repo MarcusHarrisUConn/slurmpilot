@@ -9,6 +9,7 @@
 <url><loc>https://marcusharrisphd.com/slurmpilot/articles/getting-started.html</loc></url>
 <url><loc>https://marcusharrisphd.com/slurmpilot/articles/index.html</loc></url>
 <url><loc>https://marcusharrisphd.com/slurmpilot/articles/pilot-to-cluster.html</loc></url>
+<url><loc>https://marcusharrisphd.com/slurmpilot/articles/pipelines-and-efficiency.html</loc></url>
 <url><loc>https://marcusharrisphd.com/slurmpilot/articles/troubleshooting-and-retries.html</loc></url>
 <url><loc>https://marcusharrisphd.com/slurmpilot/authors.html</loc></url>
 <url><loc>https://marcusharrisphd.com/slurmpilot/index.html</loc></url>
@@ -40,6 +41,7 @@
 <url><loc>https://marcusharrisphd.com/slurmpilot/reference/parse_squeue_output.html</loc></url>
 <url><loc>https://marcusharrisphd.com/slurmpilot/reference/pilot_run.html</loc></url>
 <url><loc>https://marcusharrisphd.com/slurmpilot/reference/plan_chunks.html</loc></url>
+<url><loc>https://marcusharrisphd.com/slurmpilot/reference/plot.slurmpilot_efficiency.html</loc></url>
 <url><loc>https://marcusharrisphd.com/slurmpilot/reference/plot.slurmpilot_pilot.html</loc></url>
 <url><loc>https://marcusharrisphd.com/slurmpilot/reference/render_sbatch_script.html</loc></url>
 <url><loc>https://marcusharrisphd.com/slurmpilot/reference/render_worker_script.html</loc></url>
@@ -50,17 +52,24 @@
 <url><loc>https://marcusharrisphd.com/slurmpilot/reference/slurm_autopilot.html</loc></url>
 <url><loc>https://marcusharrisphd.com/slurmpilot/reference/slurm_cancel.html</loc></url>
 <url><loc>https://marcusharrisphd.com/slurmpilot/reference/slurm_collect.html</loc></url>
+<url><loc>https://marcusharrisphd.com/slurmpilot/reference/slurm_efficiency_report.html</loc></url>
 <url><loc>https://marcusharrisphd.com/slurmpilot/reference/slurm_job_spec.html</loc></url>
 <url><loc>https://marcusharrisphd.com/slurmpilot/reference/slurm_logs.html</loc></url>
+<url><loc>https://marcusharrisphd.com/slurmpilot/reference/slurm_pipeline.html</loc></url>
+<url><loc>https://marcusharrisphd.com/slurmpilot/reference/slurm_pipeline_collect.html</loc></url>
+<url><loc>https://marcusharrisphd.com/slurmpilot/reference/slurm_pipeline_run.html</loc></url>
+<url><loc>https://marcusharrisphd.com/slurmpilot/reference/slurm_pipeline_status.html</loc></url>
 <url><loc>https://marcusharrisphd.com/slurmpilot/reference/slurm_retry.html</loc></url>
 <url><loc>https://marcusharrisphd.com/slurmpilot/reference/slurm_retry_history.html</loc></url>
 <url><loc>https://marcusharrisphd.com/slurmpilot/reference/slurm_ssh_backend.html</loc></url>
+<url><loc>https://marcusharrisphd.com/slurmpilot/reference/slurm_stage.html</loc></url>
 <url><loc>https://marcusharrisphd.com/slurmpilot/reference/slurm_status.html</loc></url>
 <url><loc>https://marcusharrisphd.com/slurmpilot/reference/slurm_submit.html</loc></url>
 <url><loc>https://marcusharrisphd.com/slurmpilot/reference/slurm_wait.html</loc></url>
 <url><loc>https://marcusharrisphd.com/slurmpilot/reference/slurmpilot-package.html</loc></url>
 <url><loc>https://marcusharrisphd.com/slurmpilot/reference/slurmpilot_rng_stream.html</loc></url>
 <url><loc>https://marcusharrisphd.com/slurmpilot/reference/toolchain_registry.html</loc></url>
+<url><loc>https://marcusharrisphd.com/slurmpilot/reference/use_rcapsule_container.html</loc></url>
 <url><loc>https://marcusharrisphd.com/slurmpilot/reference/verify_checkpoint.html</loc></url>
 </urlset>
 

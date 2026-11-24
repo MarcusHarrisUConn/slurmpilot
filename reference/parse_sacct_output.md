@@ -38,5 +38,5 @@ parse_sacct_output(sample_out)
 #>   slurm_job_id chunk_id state         elapsed_sec peak_rss_mb exit_code
 #>   <chr>           <int> <chr>               <dbl>       <dbl>     <int>
 #> 1 12345               1 COMPLETED             252         500         0
-#> 2 12345               2 OUT_OF_MEMORY          65          NA         0
+#> 2 12345               2 OUT_OF_MEMORY          65          NA       253
 ```

@@ -183,7 +183,7 @@ print(res)
 #> ── slurmpilot SLURM Resource Plan 
 #> • Workload: 500 tasks -> 1 array chunks (500 tasks/chunk)
 #> • SLURM flags: --array=1 --cpus-per-task=1 --mem=512M --time=00:05:00
-#> ℹ Predicted chunk walltime: 1.3s (expected 1.2s, startup overhead 59.3%)
-#> ℹ Predicted peak RSS: 130.8 MB -> requested 512M
+#> ℹ Predicted chunk walltime: 0.7s (expected 0.7s, startup overhead 99.3%)
+#> ℹ Predicted peak RSS: 140.1 MB -> requested 512M
 #> ℹ Estimated total compute: 0.00 CPU-hours
 ```

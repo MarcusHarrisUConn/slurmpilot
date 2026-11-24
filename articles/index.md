@@ -10,3 +10,5 @@
   Offloading](https://marcusharrisphd.com/slurmpilot/articles/apptainer-ssh-shiny.md):
 - [Troubleshooting, Adaptive Retries & Reproducible Parallel
   RNG](https://marcusharrisphd.com/slurmpilot/articles/troubleshooting-and-retries.md):
+- [Multi-Stage HPC Pipelines, Efficiency Auditing & Container
+  Handoff](https://marcusharrisphd.com/slurmpilot/articles/pipelines-and-efficiency.md):

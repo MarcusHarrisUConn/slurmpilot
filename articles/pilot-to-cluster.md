@@ -50,9 +50,9 @@ print(pilot)
 #> 
 #> ── slurmpilot Micro-Pilot Profile
 #> • Trials: 3/3 succeeded (isolated=TRUE, cpus=1)
-#> • Task exec time: median 0.002s, p90 0.004s, max 0.004s
-#> • Worker startup: median 0.274s
-#> • Memory (RSS): baseline 76.3 MB, peak max 76.7 MB, net max 0.4 MB
+#> • Task exec time: median 0.002s, p90 0.002s, max 0.002s
+#> • Worker startup: median 0.289s
+#> • Memory (RSS): baseline 76.3 MB, peak max 76.6 MB, net max 0.4 MB
 summary(pilot)
 #> # A tibble: 13 × 2
 #>    metric                    value
@@ -60,16 +60,16 @@ summary(pilot)
 #>  1 n_trials                3      
 #>  2 n_ok                    3      
 #>  3 n_failed                0      
-#>  4 startup_median_sec      0.274  
-#>  5 exec_mean_sec           0.00267
-#>  6 exec_sd_sec             0.00115
+#>  4 startup_median_sec      0.289  
+#>  5 exec_mean_sec           0.00200
+#>  6 exec_sd_sec             0      
 #>  7 exec_q50_sec            0.00200
-#>  8 exec_q90_sec            0.00360
-#>  9 exec_q95_sec            0.00380
-#> 10 exec_max_sec            0.00400
+#>  8 exec_q90_sec            0.00200
+#>  9 exec_q95_sec            0.00200
+#> 10 exec_max_sec            0.00200
 #> 11 baseline_rss_median_mb 76.3    
-#> 12 peak_rss_max_mb        76.7    
-#> 13 net_rss_max_mb          0.379
+#> 12 peak_rss_max_mb        76.6    
+#> 13 net_rss_max_mb          0.352
 plot(pilot, engine = "base")
 ```
 

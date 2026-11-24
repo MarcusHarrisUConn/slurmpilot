@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">slurmpilot</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.5.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -22,6 +22,7 @@
     <li><a class="dropdown-item" href="../articles/pilot-to-cluster.html">From Micro-Pilot Profiling to Load-Balanced SLURM Arrays</a></li>
     <li><a class="dropdown-item" href="../articles/apptainer-ssh-shiny.html">Apptainer Packaging, Remote SSH/SLURM &amp; Non-Blocking Shiny Offloading</a></li>
     <li><a class="dropdown-item" href="../articles/troubleshooting-and-retries.html">Troubleshooting, Adaptive Retries &amp; Reproducible Parallel RNG</a></li>
+    <li><a class="dropdown-item" href="../articles/pipelines-and-efficiency.html">Multi-Stage HPC Pipelines, Efficiency Auditing &amp; Container Handoff</a></li>
   </ul></li>
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-pdfs" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">PDFs</button>
@@ -46,7 +47,7 @@
     <div class="section level2">
       <h2 id="micro-pilot-profiling-resource-sizing">Micro-Pilot Profiling &amp; Resource Sizing<a class="anchor" aria-label="anchor" href="#micro-pilot-profiling-resource-sizing"></a></h2>
 
-      <div class="section-desc"><p>Empirically profile OS RSS &amp; runtime, size SLURM arrays, load-balance heterogeneous workloads, and audit closures.</p></div>
+      <div class="section-desc"><p>Empirically profile OS RSS &amp; runtime, size SLURM arrays, load-balance heterogeneous workloads, audit closures, and inspect post-mortem efficiency.</p></div>
 
       <dl></dl></div><div class="section level2">
 
@@ -108,10 +109,24 @@
 
         </dt>
         <dd>Inspect Worker Function Closures, Globals, and Serialization Bundle Size</dd>
-      </dl></div><div class="section level2">
-      <h2 id="job-lifecycle-autopilot">Job Lifecycle &amp; Autopilot<a class="anchor" aria-label="anchor" href="#job-lifecycle-autopilot"></a></h2>
 
-      <div class="section-desc"><p>User-facing S3 workflow API for submitting, monitoring, retrying, cancelling, and collecting array jobs.</p></div>
+        <dt>
+
+          <code><a href="slurm_efficiency_report.html">slurm_efficiency_report()</a></code>
+
+        </dt>
+        <dd>Audit Post-Mortem SLURM Memory, Walltime, and Load-Balance Efficiency</dd>
+
+        <dt>
+
+          <code><a href="plot.slurmpilot_efficiency.html">plot(<i>&lt;slurmpilot_efficiency&gt;</i>)</a></code>
+
+        </dt>
+        <dd>Plot a Post-Mortem SLURM Resource Efficiency Report</dd>
+      </dl></div><div class="section level2">
+      <h2 id="multi-stage-pipelines-job-lifecycle">Multi-Stage Pipelines &amp; Job Lifecycle<a class="anchor" aria-label="anchor" href="#multi-stage-pipelines-job-lifecycle"></a></h2>
+
+      <div class="section-desc"><p>User-facing S3 workflow API for single-stage jobs, autopilot runs, and multi-stage dependent HPC DAGs.</p></div>
 
       <dl></dl></div><div class="section level2">
 
@@ -187,6 +202,41 @@
 
         </dt>
         <dd>Collect Ordered Task Results from a Completed Job</dd>
+
+        <dt>
+
+          <code><a href="slurm_stage.html">slurm_stage()</a></code>
+
+        </dt>
+        <dd>Define a Stage in a Multi-Stage SLURM Pipeline DAG</dd>
+
+        <dt>
+
+          <code><a href="slurm_pipeline.html">slurm_pipeline()</a></code>
+
+        </dt>
+        <dd>Construct a Validated Multi-Stage SLURM Pipeline DAG</dd>
+
+        <dt>
+
+          <code><a href="slurm_pipeline_run.html">slurm_pipeline_run()</a></code>
+
+        </dt>
+        <dd>Execute a Multi-Stage SLURM Pipeline DAG</dd>
+
+        <dt>
+
+          <code><a href="slurm_pipeline_status.html">slurm_pipeline_status()</a></code>
+
+        </dt>
+        <dd>Inspect Status Across All Stages of a SLURM Pipeline Run</dd>
+
+        <dt>
+
+          <code><a href="slurm_pipeline_collect.html">slurm_pipeline_collect()</a></code>
+
+        </dt>
+        <dd>Collect Results from a Completed SLURM Pipeline Run</dd>
       </dl></div><div class="section level2">
       <h2 id="scheduler-backends">Scheduler Backends<a class="anchor" aria-label="anchor" href="#scheduler-backends"></a></h2>
 
@@ -232,9 +282,9 @@
         </dt>
         <dd>Create an SSH/SLURM Scheduler Backend</dd>
       </dl></div><div class="section level2">
-      <h2 id="hpc-environment-apptainer-batch-scripts">HPC Environment, Apptainer &amp; Batch Scripts<a class="anchor" aria-label="anchor" href="#hpc-environment-apptainer-batch-scripts"></a></h2>
+      <h2 id="hpc-environment-apptainer-container-handoff">HPC Environment, Apptainer &amp; Container Handoff<a class="anchor" aria-label="anchor" href="#hpc-environment-apptainer-container-handoff"></a></h2>
 
-      <div class="section-desc"><p>Scan dependencies, detect compiled toolchains, and emit reproducible Apptainer .def recipes, sbatch scripts, and standalone workers.</p></div>
+      <div class="section-desc"><p>Scan dependencies, detect compiled toolchains, emit reproducible Apptainer .def recipes and sbatch scripts, and attach rcapsule containers.</p></div>
 
       <dl></dl></div><div class="section level2">
 
@@ -261,6 +311,13 @@
 
         </dt>
         <dd>Build a Reproducible Apptainer/Singularity <code>.def</code> Recipe</dd>
+
+        <dt>
+
+          <code><a href="use_rcapsule_container.html">use_rcapsule_container()</a></code>
+
+        </dt>
+        <dd>Attach a Validated Apptainer or <code>rcapsule</code> Container to a SLURM Job Spec</dd>
 
         <dt>
 

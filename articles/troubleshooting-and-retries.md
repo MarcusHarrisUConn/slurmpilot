@@ -68,15 +68,15 @@ print(st2)
 #> ── slurmpilot Job Status: adaptive_demo [COMPLETED]
 #> • Progress: 4/4 chunks (100%) | running=0, pending=0, failed=0, oom=0,
 #>   timeout=0, cancelled=0
-#> • Peak RSS max: 73.8 MB | Cumulative walltime: 0.15s
+#> • Peak RSS max: 73.4 MB | Cumulative walltime: 0.17s
 
 # Inspect recorded retry provenance
 slurm_retry_history(job)
 #> # A tibble: 2 × 9
 #>   retry_round timestamp             chunk_id trigger_state old_mem_mb new_mem_mb
 #>         <int> <chr>                    <int> <chr>              <int>      <int>
-#> 1           1 2026-11-24T19:33:54.…        2 OUT_OF_MEMORY        512        768
-#> 2           1 2026-11-24T19:33:54.…        4 TIMEOUT              512        768
+#> 1           1 2026-11-24T21:06:59.…        2 OUT_OF_MEMORY        512        768
+#> 2           1 2026-11-24T21:06:59.…        4 TIMEOUT              512        768
 #> # ℹ 3 more variables: old_time_sec <int>, new_time_sec <int>, adaptive <lgl>
 
 # Verify completed results in exact 1..8 order
@@ -111,7 +111,7 @@ chk <- verify_checkpoint(cp2)
 chk$ok
 #> [1] FALSE
 chk$reason
-#> [1] "SHA-256 sidecar mismatch (expected b53ffc03e0f6da0dead4f6f76fbd9fb0e7e91cb91833830bb647b05be98312d7, got b9ef2d1dcf916c23ff9fea3a1a7cd464939c70d9d739815a25210dda21a1f23a)."
+#> [1] "SHA-256 sidecar mismatch (expected 6fa0d2046e32d048c15fefbb02f016ef94d78444513c64212cb1ee3ad0e7b411, got bfaf6d52f076580f35e12f1dab72e3f378af7ef91ae7e886ca4ad4b4d72ec505)."
 
 # Surgical retry of chunk 2 heals the corrupted checkpoint cleanly
 job <- slurm_retry(job, chunks = 2L, adaptive = FALSE)
@@ -158,7 +158,7 @@ slurm_wait(rng_job, timeout = 30, poll_interval = 0.05)
 #> ── slurmpilot Job Status: rng_verify [COMPLETED]
 #> • Progress: 3/3 chunks (100%) | running=0, pending=0, failed=0, oom=0,
 #>   timeout=0, cancelled=0
-#> • Peak RSS max: 73.1 MB | Cumulative walltime: 0.11s
+#> • Peak RSS max: 74.0 MB | Cumulative walltime: 0.10s
 rng_out <- slurm_collect(rng_job)
 
 # All workers used L'Ecuyer-CMRG and produced empirically uncorrelated streams

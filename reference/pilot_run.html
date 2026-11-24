@@ -17,7 +17,7 @@ into estimate_resources()."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">slurmpilot</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.5.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -32,6 +32,7 @@ into estimate_resources()."></head><body>
     <li><a class="dropdown-item" href="../articles/pilot-to-cluster.html">From Micro-Pilot Profiling to Load-Balanced SLURM Arrays</a></li>
     <li><a class="dropdown-item" href="../articles/apptainer-ssh-shiny.html">Apptainer Packaging, Remote SSH/SLURM &amp; Non-Blocking Shiny Offloading</a></li>
     <li><a class="dropdown-item" href="../articles/troubleshooting-and-retries.html">Troubleshooting, Adaptive Retries &amp; Reproducible Parallel RNG</a></li>
+    <li><a class="dropdown-item" href="../articles/pipelines-and-efficiency.html">Multi-Stage HPC Pipelines, Efficiency Auditing &amp; Container Handoff</a></li>
   </ul></li>
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-pdfs" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">PDFs</button>
@@ -78,7 +79,8 @@ into <code><a href="estimate_resources.html">estimate_resources()</a></code>.</p
 <span>  packages <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">character</a></span><span class="op">(</span><span class="op">)</span>,</span>
 <span>  globals <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span><span class="op">)</span>,</span>
 <span>  isolate <span class="op">=</span> <span class="cn">TRUE</span>,</span>
-<span>  progress <span class="op">=</span> <span class="cn">FALSE</span></span>
+<span>  progress <span class="op">=</span> <span class="cn">FALSE</span>,</span>
+<span>  scrub_secrets <span class="op">=</span> <span class="cn">TRUE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -146,6 +148,12 @@ isolated OS RSS. Set <code>FALSE</code> only for fast in-process profiling.</p><
 <dd><p>Logical; if <code>TRUE</code>, emits concise progress messages via
 <code>cli</code>. Default <code>FALSE</code>.</p></dd>
 
+
+<dt id="arg-scrub-secrets">scrub_secrets<a class="anchor" aria-label="anchor" href="#arg-scrub-secrets"></a></dt>
+<dd><p>Logical; when <code>isolate = TRUE</code>, scrub ambient host
+secret/credential environment variables before spawning pilot child
+processes. Default <code>TRUE</code>.</p></dd>
+
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
@@ -179,9 +187,9 @@ isolated OS RSS. Set <code>FALSE</code> only for fast in-process profiling.</p><
 <span class="r-msg co"><span class="r-pr">#&gt;</span> </span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> ── slurmpilot Micro-Pilot Profile </span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">•</span> Trials: 2/2 succeeded (isolated=TRUE, cpus=1)</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">•</span> Task exec time: median 0.001s, p90 0.001s, max 0.001s</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">•</span> Worker startup: median 0.728s</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">•</span> Memory (RSS): baseline 89.7 MB, peak max 90.0 MB, net max 0.2 MB</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">•</span> Task exec time: median 0.000s, p90 0.000s, max 0.000s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">•</span> Worker startup: median 0.722s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">•</span> Memory (RSS): baseline 96.4 MB, peak max 96.9 MB, net max 0.5 MB</span>
 </code></pre></div>
     </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

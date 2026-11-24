@@ -13,7 +13,7 @@ with configurable safety margins and queue-friendly rounding."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">slurmpilot</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.5.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -28,6 +28,7 @@ with configurable safety margins and queue-friendly rounding."></head><body>
     <li><a class="dropdown-item" href="../articles/pilot-to-cluster.html">From Micro-Pilot Profiling to Load-Balanced SLURM Arrays</a></li>
     <li><a class="dropdown-item" href="../articles/apptainer-ssh-shiny.html">Apptainer Packaging, Remote SSH/SLURM &amp; Non-Blocking Shiny Offloading</a></li>
     <li><a class="dropdown-item" href="../articles/troubleshooting-and-retries.html">Troubleshooting, Adaptive Retries &amp; Reproducible Parallel RNG</a></li>
+    <li><a class="dropdown-item" href="../articles/pipelines-and-efficiency.html">Multi-Stage HPC Pipelines, Efficiency Auditing &amp; Container Handoff</a></li>
   </ul></li>
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-pdfs" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">PDFs</button>
@@ -228,8 +229,8 @@ logarithmic heap fragmentation across sequential replications
 <span class="r-msg co"><span class="r-pr">#&gt;</span> ── slurmpilot SLURM Resource Plan </span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">•</span> Workload: 500 tasks -&gt; 1 array chunks (500 tasks/chunk)</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">•</span> SLURM flags: --array=1 --cpus-per-task=1 --mem=512M --time=00:05:00</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Predicted chunk walltime: 1.3s (expected 1.2s, startup overhead 59.3%)</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Predicted peak RSS: 130.8 MB -&gt; requested 512M</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Predicted chunk walltime: 0.7s (expected 0.7s, startup overhead 99.3%)</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Predicted peak RSS: 140.1 MB -&gt; requested 512M</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Estimated total compute: 0.00 CPU-hours</span>
 </code></pre></div>
     </div>

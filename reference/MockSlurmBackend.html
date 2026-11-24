@@ -19,7 +19,7 @@ result collection — enabling 100% offline development and testing on a laptop.
 
     <a class="navbar-brand me-2" href="../index.html">slurmpilot</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.5.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -34,6 +34,7 @@ result collection — enabling 100% offline development and testing on a laptop.
     <li><a class="dropdown-item" href="../articles/pilot-to-cluster.html">From Micro-Pilot Profiling to Load-Balanced SLURM Arrays</a></li>
     <li><a class="dropdown-item" href="../articles/apptainer-ssh-shiny.html">Apptainer Packaging, Remote SSH/SLURM &amp; Non-Blocking Shiny Offloading</a></li>
     <li><a class="dropdown-item" href="../articles/troubleshooting-and-retries.html">Troubleshooting, Adaptive Retries &amp; Reproducible Parallel RNG</a></li>
+    <li><a class="dropdown-item" href="../articles/pipelines-and-efficiency.html">Multi-Stage HPC Pipelines, Efficiency Auditing &amp; Container Handoff</a></li>
   </ul></li>
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-pdfs" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">PDFs</button>
@@ -106,6 +107,10 @@ result collection — enabling 100% offline development and testing on a laptop.
 <dd><p>Path to the <code>Rscript</code> executable used for worker processes.</p></dd>
 
 
+    <dt><code>scrub_secrets</code></dt>
+<dd><p>Logical; scrub ambient host credential environment variables before spawning workers (default <code>TRUE</code>).</p></dd>
+
+
 </dl><p></p></div>
     </div>
     <div class="section level2">
@@ -137,7 +142,8 @@ result collection — enabling 100% offline development and testing on a laptop.
 <span>  mem_limit_mb <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  time_limit_sec <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  fault_injection <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span><span class="op">)</span>,</span>
-<span>  rscript_bin <span class="op">=</span> <span class="cn">NULL</span></span>
+<span>  rscript_bin <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  scrub_secrets <span class="op">=</span> <span class="cn">TRUE</span></span>
 <span><span class="op">)</span></span></code></pre></div><p></p></div>
 </div><p></p><div class="section">
 <h4 id="arguments">Arguments<a class="anchor" aria-label="anchor" href="#arguments"></a></h4>
@@ -168,6 +174,11 @@ default <code>TRUE</code>).</p></dd>
       <dt><code>rscript_bin</code></dt>
 <dd><p>Optional explicit path to <code>Rscript</code>. Defaults to the active
 R installation's <code>Rscript</code>.</p></dd>
+
+      <dt><code>scrub_secrets</code></dt>
+<dd><p>Logical; strip ambient secret/credential environment
+variables from spawned worker processes (explicit <code>job_spec$env_vars</code> are
+always forwarded). Default <code>TRUE</code>.</p></dd>
 
 
 </dl><p></p></div>
@@ -387,7 +398,7 @@ R installation's <code>Rscript</code>.</p></dd>
     <h2 id="ref-examples">Examples<a class="anchor" aria-label="anchor" href="#ref-examples"></a></h2>
     <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="va">be</span> <span class="op">&lt;-</span> <span class="va">MockSlurmBackend</span><span class="op">$</span><span class="fu">new</span><span class="op">(</span>max_workers <span class="op">=</span> <span class="fl">2L</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="va">be</span><span class="op">)</span></span></span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> &lt;<span style="color: #0000BB;">&lt;MockSlurmBackend&gt;</span>&gt; root=<span style="color: #0000BB;">/tmp/RtmpamJPcO/slurmpilot_mock_189e6afe1167</span>,</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> &lt;<span style="color: #0000BB;">&lt;MockSlurmBackend&gt;</span>&gt; root=<span style="color: #0000BB;">/tmp/RtmpY5vFEo/slurmpilot_mock_17e06634d50f</span>,</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> max_workers=2, jobs=0, active_workers=0</span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/unlink.html" class="external-link">unlink</a></span><span class="op">(</span><span class="va">be</span><span class="op">$</span><span class="va">root_dir</span>, recursive <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></span>
 </code></pre></div>

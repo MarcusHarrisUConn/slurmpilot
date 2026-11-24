@@ -24,6 +24,7 @@ render_sbatch_script(
   mail_user = NULL,
   mail_type = NULL,
   extra_sbatch = character(),
+  dependency = NULL,
   output_path = NULL
 )
 ```
@@ -99,6 +100,11 @@ render_sbatch_script(
 
   Optional character vector of extra `#SBATCH` flags (without leading
   `#SBATCH`; `--wrap` and shell metacharacters are forbidden).
+
+- dependency:
+
+  Optional SLURM `--dependency` string (e.g. `"afterok:12345"` or
+  `"afterok:12345:12346"`) for multi-stage job DAGs.
 
 - output_path:
 

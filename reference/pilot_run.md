@@ -23,7 +23,8 @@ pilot_run(
   packages = character(),
   globals = list(),
   isolate = TRUE,
-  progress = FALSE
+  progress = FALSE,
+  scrub_secrets = TRUE
 )
 ```
 
@@ -91,6 +92,12 @@ pilot_run(
   Logical; if `TRUE`, emits concise progress messages via `cli`. Default
   `FALSE`.
 
+- scrub_secrets:
+
+  Logical; when `isolate = TRUE`, scrub ambient host secret/credential
+  environment variables before spawning pilot child processes. Default
+  `TRUE`.
+
 ## Value
 
 An S3 object of class `"slurmpilot_pilot"` with elements:
@@ -129,7 +136,7 @@ print(pilot)
 #> 
 #> ── slurmpilot Micro-Pilot Profile 
 #> • Trials: 2/2 succeeded (isolated=TRUE, cpus=1)
-#> • Task exec time: median 0.001s, p90 0.001s, max 0.001s
-#> • Worker startup: median 0.728s
-#> • Memory (RSS): baseline 89.7 MB, peak max 90.0 MB, net max 0.2 MB
+#> • Task exec time: median 0.000s, p90 0.000s, max 0.000s
+#> • Worker startup: median 0.722s
+#> • Memory (RSS): baseline 96.4 MB, peak max 96.9 MB, net max 0.5 MB
 ```

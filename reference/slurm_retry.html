@@ -19,7 +19,7 @@ retry provenance accessible via slurm_retry_history()."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">slurmpilot</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.5.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -34,6 +34,7 @@ retry provenance accessible via slurm_retry_history()."></head><body>
     <li><a class="dropdown-item" href="../articles/pilot-to-cluster.html">From Micro-Pilot Profiling to Load-Balanced SLURM Arrays</a></li>
     <li><a class="dropdown-item" href="../articles/apptainer-ssh-shiny.html">Apptainer Packaging, Remote SSH/SLURM &amp; Non-Blocking Shiny Offloading</a></li>
     <li><a class="dropdown-item" href="../articles/troubleshooting-and-retries.html">Troubleshooting, Adaptive Retries &amp; Reproducible Parallel RNG</a></li>
+    <li><a class="dropdown-item" href="../articles/pipelines-and-efficiency.html">Multi-Stage HPC Pipelines, Efficiency Auditing &amp; Container Handoff</a></li>
   </ul></li>
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-pdfs" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">PDFs</button>
@@ -159,19 +160,19 @@ provenance.</p>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> ── slurmpilot Job Status: slurmpilot_job [PARTIAL_FAILURE] </span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">•</span> Progress: 1/2 chunks (50%) | running=0, pending=0, failed=0, oom=1,</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span>   timeout=0, cancelled=0</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">•</span> Peak RSS max: 104.6 MB | Cumulative walltime: 0.98s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">•</span> Peak RSS max: 110.1 MB | Cumulative walltime: 0.98s</span>
 <span class="r-in"><span><span class="va">job</span> <span class="op">&lt;-</span> <span class="fu">slurm_retry</span><span class="op">(</span><span class="va">job</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="fu"><a href="slurm_wait.html">slurm_wait</a></span><span class="op">(</span><span class="va">job</span>, poll_interval <span class="op">=</span> <span class="fl">0.05</span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> </span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> ── slurmpilot Job Status: slurmpilot_job [COMPLETED] </span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">•</span> Progress: 2/2 chunks (100%) | running=0, pending=0, failed=0, oom=0,</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span>   timeout=0, cancelled=0</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">•</span> Peak RSS max: 106.9 MB | Cumulative walltime: 0.98s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">•</span> Peak RSS max: 110.1 MB | Cumulative walltime: 1.00s</span>
 <span class="r-in"><span><span class="fu"><a href="slurm_retry_history.html">slurm_retry_history</a></span><span class="op">(</span><span class="va">job</span><span class="op">)</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># A tibble: 1 × 9</span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   retry_round timestamp             chunk_id trigger_state old_mem_mb new_mem_mb</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>         <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>                    <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>              <span style="color: #949494; font-style: italic;">&lt;int&gt;</span>      <span style="color: #949494; font-style: italic;">&lt;int&gt;</span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">1</span>           1 2026-11-24T19:33:28.…        2 OUT_OF_MEMORY        512        768</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">1</span>           1 2026-11-24T21:06:27.…        2 OUT_OF_MEMORY        512        768</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># ℹ 3 more variables: old_time_sec &lt;int&gt;, new_time_sec &lt;int&gt;, adaptive &lt;lgl&gt;</span></span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/unlink.html" class="external-link">unlink</a></span><span class="op">(</span><span class="va">be</span><span class="op">$</span><span class="va">root_dir</span>, recursive <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></span>
 </code></pre></div>

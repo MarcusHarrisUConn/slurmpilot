@@ -22,7 +22,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">slurmpilot</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.5.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -39,6 +39,7 @@
     <li><a class="dropdown-item" href="../articles/pilot-to-cluster.html">From Micro-Pilot Profiling to Load-Balanced SLURM Arrays</a></li>
     <li><a class="dropdown-item" href="../articles/apptainer-ssh-shiny.html">Apptainer Packaging, Remote SSH/SLURM &amp; Non-Blocking Shiny Offloading</a></li>
     <li><a class="dropdown-item" href="../articles/troubleshooting-and-retries.html">Troubleshooting, Adaptive Retries &amp; Reproducible Parallel RNG</a></li>
+    <li><a class="dropdown-item" href="../articles/pipelines-and-efficiency.html">Multi-Stage HPC Pipelines, Efficiency Auditing &amp; Container Handoff</a></li>
   </ul>
 </li>
 <li class="nav-item dropdown">
@@ -139,7 +140,7 @@ objects or miss helper functions:</p>
 <span><span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="va">audit</span><span class="op">)</span></span>
 <span><span class="co">#&gt; </span></span>
 <span><span class="co">#&gt; ── slurmpilot Pre-Submit Globals &amp; Bundle Audit [OK]</span></span>
-<span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> Estimated payload size: 0.01 MB (closure=0.00 MB, globals=0.00 MB, args=0.01</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> Estimated payload size: 0.01 MB (closure=0.00 MB, globals=0.00 MB, args=0.00</span></span>
 <span><span class="co">#&gt;   MB)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> Captured local closure objects: 0 | Explicit globals: 0</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> Unresolved variables: 0 | Unexported functions: 0</span></span></code></pre></div>
@@ -157,9 +158,9 @@ auto-size SLURM resources, and execute on <code>MockSlurmBackend</code>
 <span><span class="co">#&gt; </span></span>
 <span><span class="co">#&gt; ── slurmpilot Micro-Pilot Profile</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> Trials: 2/2 succeeded (isolated=TRUE, cpus=1)</span></span>
-<span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> Task exec time: median 0.008s, p90 0.010s, max 0.010s</span></span>
-<span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> Worker startup: median 0.300s</span></span>
-<span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> Memory (RSS): baseline 76.4 MB, peak max 76.9 MB, net max 0.5 MB</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> Task exec time: median 0.011s, p90 0.011s, max 0.011s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> Worker startup: median 0.282s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> Memory (RSS): baseline 76.3 MB, peak max 76.8 MB, net max 0.4 MB</span></span>
 <span></span>
 <span><span class="va">resources</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/estimate_resources.html">estimate_resources</a></span><span class="op">(</span></span>
 <span>  pilot <span class="op">=</span> <span class="va">pilot</span>,</span>
@@ -171,8 +172,8 @@ auto-size SLURM resources, and execute on <code>MockSlurmBackend</code>
 <span><span class="co">#&gt; ── slurmpilot SLURM Resource Plan</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> Workload: 12 tasks -&gt; 3 array chunks (4 tasks/chunk)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> SLURM flags: --array=1-3 --cpus-per-task=1 --mem=512M --time=00:05:00</span></span>
-<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Predicted chunk walltime: 0.4s (expected 0.3s, startup overhead 90.4%)</span></span>
-<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Predicted peak RSS: 84.6 MB -&gt; requested 512M</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Predicted chunk walltime: 0.3s (expected 0.3s, startup overhead 86.5%)</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Predicted peak RSS: 84.5 MB -&gt; requested 512M</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Estimated total compute: 0.00 CPU-hours</span></span>
 <span></span>
 <span><span class="va">tmp_root</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempfile</a></span><span class="op">(</span><span class="st">"sp_gs_"</span><span class="op">)</span></span>
@@ -193,7 +194,7 @@ auto-size SLURM resources, and execute on <code>MockSlurmBackend</code>
 <span><span class="co">#&gt; ── slurmpilot Job Status: quickstart_power [COMPLETED]</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> Progress: 3/3 chunks (100%) | running=0, pending=0, failed=0, oom=0,</span></span>
 <span><span class="co">#&gt;   timeout=0, cancelled=0</span></span>
-<span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> Peak RSS max: 74.7 MB | Cumulative walltime: 0.23s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> Peak RSS max: 73.5 MB | Cumulative walltime: 0.27s</span></span>
 <span></span>
 <span><span class="va">results</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/slurm_collect.html">slurm_collect</a></span><span class="op">(</span><span class="va">job</span>, simplify <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/utils/head.html" class="external-link">head</a></span><span class="op">(</span><span class="va">results</span><span class="op">)</span></span>

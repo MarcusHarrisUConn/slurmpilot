@@ -239,13 +239,17 @@ Stage and submit a SLURM array job over SSH/SCP.
 
 #### Usage
 
-    SlurmSshBackend$submit(job_spec, ...)
+    SlurmSshBackend$submit(job_spec, dependency = NULL, ...)
 
 #### Arguments
 
 - `job_spec`:
 
   A `slurmpilot_job_spec` object.
+
+- `dependency`:
+
+  Optional SLURM `--dependency` string (e.g. `"afterok:12345"`).
 
 - `...`:
 

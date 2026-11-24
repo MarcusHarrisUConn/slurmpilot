@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">slurmpilot</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.5.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -22,6 +22,7 @@
     <li><a class="dropdown-item" href="../articles/pilot-to-cluster.html">From Micro-Pilot Profiling to Load-Balanced SLURM Arrays</a></li>
     <li><a class="dropdown-item" href="../articles/apptainer-ssh-shiny.html">Apptainer Packaging, Remote SSH/SLURM &amp; Non-Blocking Shiny Offloading</a></li>
     <li><a class="dropdown-item" href="../articles/troubleshooting-and-retries.html">Troubleshooting, Adaptive Retries &amp; Reproducible Parallel RNG</a></li>
+    <li><a class="dropdown-item" href="../articles/pipelines-and-efficiency.html">Multi-Stage HPC Pipelines, Efficiency Auditing &amp; Container Handoff</a></li>
   </ul></li>
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-pdfs" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">PDFs</button>
@@ -44,6 +45,71 @@
       <small>Source: <a href="https://github.com/MarcusHarrisUConn/slurmpilot/blob/main/NEWS.md" class="external-link"><code>NEWS.md</code></a></small>
     </div>
 
+    <div class="section level2">
+<h2 class="pkg-version" data-toc-text="0.5.0" id="slurmpilot-050">slurmpilot 0.5.0<a class="anchor" aria-label="anchor" href="#slurmpilot-050"></a></h2>
+<div class="section level3">
+<h3 id="security-hardening--independent-peer-red-team-remediation-0-5-0">Security Hardening &amp; Independent Peer Red-Team Remediation<a class="anchor" aria-label="anchor" href="#security-hardening--independent-peer-red-team-remediation-0-5-0"></a></h3>
+<ul><li>
+<strong>Eliminated <code>cli</code> Glue <code>{...}</code> RCE (<code>R/globals.R</code>, <code>R/efficiency.R</code>):</strong> Audited every <code>cli::</code> call package-wide so untrusted dynamic warnings and efficiency recommendations are interpolated safely via <code>{w}</code> / <code>{r}</code> without evaluating embedded R expressions.</li>
+<li>
+<strong>Hardened <code>#SBATCH</code>, SSH, SCP, URL &amp; Path Confinement Guards (<code>R/security.R</code>, <code>R/backend_ssh.R</code>, <code>R/sbatch.R</code>, <code>R/apptainer.R</code>, <code>R/env_scan.R</code>):</strong>
+<ul><li>Blocked <code>--wrap</code>, <code>--prolog</code>/<code>--epilog</code>, <code>--output</code>/<code>--error</code>, <code>--export</code>, quotes, and multi-flag smuggling in <code>extra_sbatch</code>, and disallowed spaces in SLURM/container paths (<code>sp_assert_safe_path(allow_spaces = FALSE)</code>).</li>
+<li>Blocked dangerous SSH CLI flags (<code>-F</code>, <code>-S</code>, <code>-L/-R/-D/-W</code>, <code>-A</code>, <code>-J</code>, <code>-i</code>, plus bundled variants) and directives (<code>IdentityFile</code>, <code>ControlPath</code>, <code>ProxyJump</code>, <code>ForwardAgent</code>, <code>SendEnv</code>, <code>SetEnv</code>, etc.) in <code>ssh_options</code>, and blocked whitespace/shell metacharacters in <code><a href="../reference/build_scp_args.html">build_scp_args()</a></code>.</li>
+<li>Hardened <code>sp_assert_path_confined()</code> via ancestor <code><a href="https://rdrr.io/r/base/Sys.readlink.html" class="external-link">Sys.readlink()</a></code> resolution against non-existent <code>..</code> paths and dangling external symlinks, and enforced root confinement in <code><a href="../reference/scan_project_env.html">scan_project_env()</a></code>.</li>
+<li>Blocked <code>$VAR</code> shell expansion in <code>cran_repo</code> URLs and omitted empty <code>apt-get</code> blocks in <code><a href="../reference/build_apptainer_def.html">build_apptainer_def()</a></code>.</li>
+</ul></li>
+<li>
+<strong>Ambient Secret Scrubbing &amp; Closure Audit Safety (<code>R/globals.R</code>, <code>R/pilot.R</code>, <code>R/backend_mock.R</code>, <code>R/shiny_submit.R</code>, <code>R/sbatch.R</code>):</strong>
+<ul><li>Guarded <code><a href="../reference/inspect_job_globals.html">inspect_job_globals()</a></code> against evaluating active bindings, used <code><a href="https://rdrr.io/r/base/serialize.html" class="external-link">serialize()</a></code> for accurate nested-environment sizing, and added nested credential scanning (<code>$secret_objects</code>, <code>$active_bindings</code>).</li>
+<li>Added default <code>scrub_secrets = TRUE</code> to <code><a href="../reference/pilot_run.html">pilot_run()</a></code>, <code>MockSlurmBackend</code>, <code><a href="../reference/mock_slurm_backend.html">mock_slurm_backend()</a></code>, and async Shiny pilots (scrubbing ambient credential env vars and setting <code>R_ENVIRON_USER = ""</code> / <code>R_PROFILE_USER = ""</code>), forwarded explicit <code>job_spec$env_vars</code> to mock workers, warned on secret <code>env_vars</code> in <code><a href="../reference/render_sbatch_script.html">render_sbatch_script()</a></code>, and applied <code>0600</code> permissions to written <code>.sbatch</code> files.</li>
+</ul></li>
+</ul></div>
+<div class="section level3">
+<h3 id="container-cluster-pipeline-parser-shiny--performance-fixes-0-5-0">Container, Cluster, Pipeline, Parser, Shiny &amp; Performance Fixes<a class="anchor" aria-label="anchor" href="#container-cluster-pipeline-parser-shiny--performance-fixes-0-5-0"></a></h3>
+<ul><li>
+<strong>Native <code>rcapsule</code> Interoperability (<code>R/container_hook.R</code>):</strong> <code><a href="../reference/use_rcapsule_container.html">use_rcapsule_container()</a></code> now natively consumes <code>rcapsule_apptainer_spec</code>, <code>rcapsule_apptainer</code>, <code>rcapsule_manifest</code>, <code>rcapsule_bundle</code>, and <code>rcapsule_export</code> objects (<code>def_content</code>, <code>def_sha256</code>, <code>bind_paths</code>, <code>integrity$content_digest</code>, <code>specs$apptainer</code>, directory bundle <code>.def</code> files) with zero hard dependency.</li>
+<li>
+<strong>POSIX Tilde Expansion &amp; Apptainer <code>--cleanenv</code> Forwarding (<code>R/sbatch.R</code>, <code>R/backend_ssh.R</code>):</strong>
+<ul><li>
+<code>remote_dir = "~/..."</code> now expands via <code>"$HOME"/'...'</code> across <code>mkdir</code>, <code>sbatch</code>, <code>WORK_DIR</code>, and <code>--bind</code>, with home-relative <code>#SBATCH --output</code> / <code>--error</code> paths.</li>
+<li>Exported <code>APPTAINERENV_*</code> counterparts for thread caps, <code>SLURMPILOT_*</code>, and user <code>env_vars</code> (including <code>SLURMPILOT_CONTAINER_DIGEST</code>) whenever running under <code>apptainer exec --cleanenv</code>.</li>
+</ul></li>
+<li>
+<strong>Scheduler, Pipeline &amp; Efficiency Correctness (<code>R/backend_ssh.R</code>, <code>R/pipeline.R</code>, <code>R/efficiency.R</code>, <code>R/backend_base.R</code>):</strong>
+<ul><li>Preserved per-job <code>container_binds</code> in <code>SlurmSshBackend$retry()</code> and rejected <code>DRY_RUN</code> dependencies on live (<code>dry_run = FALSE</code>) submissions.</li>
+<li>Fixed <code><a href="../reference/slurm_pipeline_run.html">slurm_pipeline_run()</a></code> to reject unsupported <code>wait = FALSE</code> DAGs on <code>MockSlurmBackend</code>, honor <code>stop_on_failure</code> and <code>"SKIPPED"</code>/<code>"OUT_OF_MEMORY"</code>/ <code>"TIMEOUT"</code> in <code>afterany</code>/<code>afternotok</code>, and gracefully mark 0-task dynamic stages <code>"SKIPPED"</code>.</li>
+<li>Hardened <code><a href="../reference/slurm_efficiency_report.html">slurm_efficiency_report()</a></code> against missing <code>chunk_id</code>, <code>Inf</code> metrics in <code><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot()</a></code>, zero-median straggler ratios (<code>Inf</code>), and 100%-failed jobs (<code>classification = "failed"</code>).</li>
+<li>Union-aligned heterogeneous data-frame results in <code>slurm_collect(simplify = TRUE)</code>.</li>
+</ul></li>
+<li>
+<strong>Parser Safety, Shiny Resilience &amp; LPT Speedup (<code>R/utils.R</code>, <code>R/backend_ssh.R</code>, <code>R/shiny_submit.R</code>, <code>R/resources.R</code>, <code>R/sbatch.R</code>):</strong>
+<ul><li>Added <code>max_indices = 100000L</code> bound to <code><a href="../reference/parse_slurm_array_spec.html">parse_slurm_array_spec()</a></code>, vectorized <code><a href="../reference/parse_squeue_output.html">parse_squeue_output()</a></code> to <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>O</mi><mo stretchy="false" form="prefix">(</mo><mi>N</mi><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">O(N)</annotation></semantics></math>, and preserved SLURM signal exit codes (<code>128 + signal</code>) in <code><a href="../reference/parse_sacct_output.html">parse_sacct_output()</a></code>.</li>
+<li>Wrapped <code><a href="../reference/mod_hpc_submit_server.html">mod_hpc_submit_server()</a></code> pilot/submission observers in <code><a href="https://rdrr.io/r/base/conditions.html" class="external-link">tryCatch()</a></code> so empty or failing <code>args_builder</code> callbacks surface clean UI alerts instead of crashing the Shiny session.</li>
+<li>Gated <code>SLURMPILOT_MOCK_FAULT</code> in <code>worker.R</code> strictly to <code>SLURMPILOT_BACKEND=mock</code>.</li>
+<li>Accelerated <code>plan_chunks(..., strategy = "lpt")</code> via C-level <code><a href="https://rdrr.io/r/base/which.min.html" class="external-link">which.min()</a></code> plus an <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>O</mi><mo stretchy="false" form="prefix">(</mo><mi>N</mi><mrow><mi mathvariant="normal">log</mi><mo>⁡</mo></mrow><mi>M</mi><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">O(N \log M)</annotation></semantics></math> binary min-heap for <code>&gt; 2048</code> chunks and eliminated duplicate partitioning in <code><a href="../reference/estimate_resources.html">estimate_resources()</a></code> and <code><a href="../reference/scale_resources.html">scale_resources()</a></code>.</li>
+</ul></li>
+</ul></div>
+</div>
+    <div class="section level2">
+<h2 class="pkg-version" data-toc-text="0.4.0" id="slurmpilot-040">slurmpilot 0.4.0<a class="anchor" aria-label="anchor" href="#slurmpilot-040"></a></h2>
+<div class="section level3">
+<h3 id="new-research-workflow-capabilities-0-4-0">New Research-Workflow Capabilities<a class="anchor" aria-label="anchor" href="#new-research-workflow-capabilities-0-4-0"></a></h3>
+<ul><li>
+<strong>Multi-Stage Dependent HPC Job DAGs (<code><a href="../reference/slurm_stage.html">slurm_stage()</a></code>, <code><a href="../reference/slurm_pipeline.html">slurm_pipeline()</a></code>, <code><a href="../reference/slurm_pipeline_run.html">slurm_pipeline_run()</a></code>, <code><a href="../reference/slurm_pipeline_status.html">slurm_pipeline_status()</a></code>, <code><a href="../reference/slurm_pipeline_collect.html">slurm_pipeline_collect()</a></code>):</strong> Define linear, fan-out, fan-in, and diamond job DAGs with Kahn topological sorting and explicit cycle/self-loop detection. Emits validated SLURM <code>#SBATCH --dependency=afterok:&lt;ids&gt;</code> flags (<code>afterok</code>, <code>afterany</code>, <code>afternotok</code>) on <code>SlurmSshBackend</code> and executes full multi-stage pipelines locally end-to-end on <code>MockSlurmBackend</code> with upstream output forwarding.</li>
+<li>
+<strong>Post-Mortem Resource Efficiency Auditor (<code><a href="../reference/slurm_efficiency_report.html">slurm_efficiency_report()</a></code>, <code><a href="../reference/plot.slurmpilot_efficiency.html">plot.slurmpilot_efficiency()</a></code>):</strong> Compares requested <code>--mem</code> and <code>--time</code> against empirical Peak RSS and walltime from <code>MockSlurmBackend</code> telemetry or <code><a href="../reference/parse_sacct_output.html">parse_sacct_output()</a></code> tables, quantifying memory waste %, walltime slack %, and straggler imbalance ratio, and recommending a concrete tightened (or escalated) <code><a href="../reference/resource_spec.html">resource_spec()</a></code> for the next run.</li>
+<li>
+<strong>Zero-Dependency Container Integration Hook (<code><a href="../reference/use_rcapsule_container.html">use_rcapsule_container()</a></code>):</strong> Accepts <code>.sif</code> / <code>.def</code> file paths, <code>slurmpilot_apptainer_def</code> recipes, or duck-typed <code>rcapsule</code> specs/manifests (with zero hard dependency) to validate paths and bind mounts strictly and attach provenance metadata and <code>SLURMPILOT_CONTAINER_DIGEST</code> to <code><a href="../reference/slurm_job_spec.html">slurm_job_spec()</a></code>.</li>
+</ul></div>
+<div class="section level3">
+<h3 id="coverage-driven-bug-fixes--quality-0-4-0">Coverage-Driven Bug Fixes &amp; Quality<a class="anchor" aria-label="anchor" href="#coverage-driven-bug-fixes--quality-0-4-0"></a></h3>
+<ul><li>Fixed subscript-out-of-bounds crash in <code><a href="../reference/verify_checkpoint.html">verify_checkpoint()</a></code> when a <code>.sha256</code> sidecar file is blank or whitespace-only.</li>
+<li>Fixed <code><a href="../reference/parse_sacct_output.html">parse_sacct_output()</a></code> and <code><a href="../reference/parse_squeue_output.html">parse_squeue_output()</a></code> misparsing non-numeric header rows when raw headered scheduler output is passed.</li>
+<li>Fixed <code>MockSlurmBackend$retry()</code> dropping <code>container_sif</code>, <code>modules</code>, and <code>env_vars</code> when regenerating <code>retry_&lt;k&gt;.sbatch</code> and carrying over previous attempt <code>peak_rss_mb</code>.</li>
+<li>Fixed <code><a href="../reference/mod_hpc_monitor_server.html">mod_hpc_monitor_server()</a></code> wiping collected <code>results()</code> on an accidental retry click against an already-<code>COMPLETED</code> job.</li>
+<li>Added a fifth executable vignette (<code>vignettes/pipelines-and-efficiency.Rmd</code>) and drove test suite coverage above 93% via <code>covr</code>.</li>
+</ul></div>
+</div>
     <div class="section level2">
 <h2 class="pkg-version" data-toc-text="0.3.0" id="slurmpilot-030">slurmpilot 0.3.0<a class="anchor" aria-label="anchor" href="#slurmpilot-030"></a></h2>
 <div class="section level3">

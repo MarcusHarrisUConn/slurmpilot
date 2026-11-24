@@ -3,7 +3,8 @@
 ## Micro-Pilot Profiling & Resource Sizing
 
 Empirically profile OS RSS & runtime, size SLURM arrays, load-balance
-heterogeneous workloads, and audit closures.
+heterogeneous workloads, audit closures, and inspect post-mortem
+efficiency.
 
 - [`pilot_run()`](https://marcusharrisphd.com/slurmpilot/reference/pilot_run.md)
   : Run an Empirical Micro-Pilot to Profile Runtime and Peak RSS Memory
@@ -22,11 +23,16 @@ heterogeneous workloads, and audit closures.
 - [`inspect_job_globals()`](https://marcusharrisphd.com/slurmpilot/reference/inspect_job_globals.md)
   : Inspect Worker Function Closures, Globals, and Serialization Bundle
   Size
+- [`slurm_efficiency_report()`](https://marcusharrisphd.com/slurmpilot/reference/slurm_efficiency_report.md)
+  : Audit Post-Mortem SLURM Memory, Walltime, and Load-Balance
+  Efficiency
+- [`plot(`*`<slurmpilot_efficiency>`*`)`](https://marcusharrisphd.com/slurmpilot/reference/plot.slurmpilot_efficiency.md)
+  : Plot a Post-Mortem SLURM Resource Efficiency Report
 
-## Job Lifecycle & Autopilot
+## Multi-Stage Pipelines & Job Lifecycle
 
-User-facing S3 workflow API for submitting, monitoring, retrying,
-cancelling, and collecting array jobs.
+User-facing S3 workflow API for single-stage jobs, autopilot runs, and
+multi-stage dependent HPC DAGs.
 
 - [`slurm_autopilot()`](https://marcusharrisphd.com/slurmpilot/reference/slurm_autopilot.md)
   : End-to-End Micro-Pilot to Cluster Autopilot
@@ -60,6 +66,21 @@ cancelling, and collecting array jobs.
 - [`slurm_collect()`](https://marcusharrisphd.com/slurmpilot/reference/slurm_collect.md)
   : Collect Ordered Task Results from a Completed Job
 
+- [`slurm_stage()`](https://marcusharrisphd.com/slurmpilot/reference/slurm_stage.md)
+  : Define a Stage in a Multi-Stage SLURM Pipeline DAG
+
+- [`slurm_pipeline()`](https://marcusharrisphd.com/slurmpilot/reference/slurm_pipeline.md)
+  : Construct a Validated Multi-Stage SLURM Pipeline DAG
+
+- [`slurm_pipeline_run()`](https://marcusharrisphd.com/slurmpilot/reference/slurm_pipeline_run.md)
+  : Execute a Multi-Stage SLURM Pipeline DAG
+
+- [`slurm_pipeline_status()`](https://marcusharrisphd.com/slurmpilot/reference/slurm_pipeline_status.md)
+  : Inspect Status Across All Stages of a SLURM Pipeline Run
+
+- [`slurm_pipeline_collect()`](https://marcusharrisphd.com/slurmpilot/reference/slurm_pipeline_collect.md)
+  : Collect Results from a Completed SLURM Pipeline Run
+
 ## Scheduler Backends
 
 Pluggable R6 scheduler interface with a local parallel mock SLURM
@@ -82,10 +103,11 @@ simulator and production SSH/SLURM adapter.
 - [`slurm_ssh_backend()`](https://marcusharrisphd.com/slurmpilot/reference/slurm_ssh_backend.md)
   : Create an SSH/SLURM Scheduler Backend
 
-## HPC Environment, Apptainer & Batch Scripts
+## HPC Environment, Apptainer & Container Handoff
 
-Scan dependencies, detect compiled toolchains, and emit reproducible
-Apptainer .def recipes, sbatch scripts, and standalone workers.
+Scan dependencies, detect compiled toolchains, emit reproducible
+Apptainer .def recipes and sbatch scripts, and attach rcapsule
+containers.
 
 - [`scan_project_env()`](https://marcusharrisphd.com/slurmpilot/reference/scan_project_env.md)
   : Scan an R Project for Package Dependencies and Compiled HPC
@@ -98,6 +120,12 @@ Apptainer .def recipes, sbatch scripts, and standalone workers.
   :
 
   Build a Reproducible Apptainer/Singularity `.def` Recipe
+
+- [`use_rcapsule_container()`](https://marcusharrisphd.com/slurmpilot/reference/use_rcapsule_container.md)
+  :
+
+  Attach a Validated Apptainer or `rcapsule` Container to a SLURM Job
+  Spec
 
 - [`render_sbatch_script()`](https://marcusharrisphd.com/slurmpilot/reference/render_sbatch_script.md)
   :

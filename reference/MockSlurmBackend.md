@@ -52,6 +52,11 @@ cancellation, log inspection, and ordered result collection — enabling
 
   Path to the `Rscript` executable used for worker processes.
 
+- `scrub_secrets`:
+
+  Logical; scrub ambient host credential environment variables before
+  spawning workers (default `TRUE`).
+
 ## Methods
 
 ### Public methods
@@ -98,7 +103,8 @@ Create a new `MockSlurmBackend`.
       mem_limit_mb = NULL,
       time_limit_sec = NULL,
       fault_injection = list(),
-      rscript_bin = NULL
+      rscript_bin = NULL,
+      scrub_secrets = TRUE
     )
 
 #### Arguments
@@ -137,6 +143,12 @@ Create a new `MockSlurmBackend`.
 
   Optional explicit path to `Rscript`. Defaults to the active R
   installation's `Rscript`.
+
+- `scrub_secrets`:
+
+  Logical; strip ambient secret/credential environment variables from
+  spawned worker processes (explicit `job_spec$env_vars` are always
+  forwarded). Default `TRUE`.
 
 ------------------------------------------------------------------------
 
@@ -368,7 +380,7 @@ The objects of this class are cloneable with this method.
 ``` r
 be <- MockSlurmBackend$new(max_workers = 2L)
 print(be)
-#> <<MockSlurmBackend>> root=/tmp/RtmpamJPcO/slurmpilot_mock_189e6afe1167,
+#> <<MockSlurmBackend>> root=/tmp/RtmpY5vFEo/slurmpilot_mock_17e06634d50f,
 #> max_workers=2, jobs=0, active_workers=0
 unlink(be$root_dir, recursive = TRUE)
 ```

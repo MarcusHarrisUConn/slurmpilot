@@ -63,7 +63,7 @@ audit <- inspect_job_globals(power_worker, args_list = tasks)
 print(audit)
 #> 
 #> ── slurmpilot Pre-Submit Globals & Bundle Audit [OK]
-#> • Estimated payload size: 0.01 MB (closure=0.00 MB, globals=0.00 MB, args=0.01
+#> • Estimated payload size: 0.01 MB (closure=0.00 MB, globals=0.00 MB, args=0.00
 #>   MB)
 #> • Captured local closure objects: 0 | Explicit globals: 0
 #> • Unresolved variables: 0 | Unexported functions: 0
@@ -85,9 +85,9 @@ print(pilot)
 #> 
 #> ── slurmpilot Micro-Pilot Profile
 #> • Trials: 2/2 succeeded (isolated=TRUE, cpus=1)
-#> • Task exec time: median 0.008s, p90 0.010s, max 0.010s
-#> • Worker startup: median 0.300s
-#> • Memory (RSS): baseline 76.4 MB, peak max 76.9 MB, net max 0.5 MB
+#> • Task exec time: median 0.011s, p90 0.011s, max 0.011s
+#> • Worker startup: median 0.282s
+#> • Memory (RSS): baseline 76.3 MB, peak max 76.8 MB, net max 0.4 MB
 
 resources <- estimate_resources(
   pilot = pilot,
@@ -99,8 +99,8 @@ print(resources)
 #> ── slurmpilot SLURM Resource Plan
 #> • Workload: 12 tasks -> 3 array chunks (4 tasks/chunk)
 #> • SLURM flags: --array=1-3 --cpus-per-task=1 --mem=512M --time=00:05:00
-#> ℹ Predicted chunk walltime: 0.4s (expected 0.3s, startup overhead 90.4%)
-#> ℹ Predicted peak RSS: 84.6 MB -> requested 512M
+#> ℹ Predicted chunk walltime: 0.3s (expected 0.3s, startup overhead 86.5%)
+#> ℹ Predicted peak RSS: 84.5 MB -> requested 512M
 #> ℹ Estimated total compute: 0.00 CPU-hours
 
 tmp_root <- tempfile("sp_gs_")
@@ -121,7 +121,7 @@ print(status)
 #> ── slurmpilot Job Status: quickstart_power [COMPLETED]
 #> • Progress: 3/3 chunks (100%) | running=0, pending=0, failed=0, oom=0,
 #>   timeout=0, cancelled=0
-#> • Peak RSS max: 74.7 MB | Cumulative walltime: 0.23s
+#> • Peak RSS max: 73.5 MB | Cumulative walltime: 0.27s
 
 results <- slurm_collect(job, simplify = TRUE)
 head(results)

@@ -33,8 +33,8 @@ slurm_wait(job, poll_interval = 0.05)
 #> ── slurmpilot Job Status: slurmpilot_job [COMPLETED] 
 #> • Progress: 1/1 chunks (100%) | running=0, pending=0, failed=0, oom=0,
 #>   timeout=0, cancelled=0
-#> • Peak RSS max: 101.3 MB | Cumulative walltime: 0.48s
+#> • Peak RSS max: 108.0 MB | Cumulative walltime: 0.49s
 slurm_logs(job, chunk_id = 1L)$chunk_1$stdout
-#> [1] "[slurmpilot] Chunk 1 (attempt 1): running 2 task(s) [1,2]\n[slurmpilot] Chunk 1 finished with state=COMPLETED in 0.48s"
+#> [1] "[slurmpilot] Chunk 1 (attempt 1): running 2 task(s) [1,2]\n[slurmpilot] Chunk 1 finished with state=COMPLETED in 0.49s"
 unlink(be$root_dir, recursive = TRUE)
 ```

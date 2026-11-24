@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">slurmpilot</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">0.5.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -22,6 +22,7 @@
     <li><a class="dropdown-item" href="../articles/pilot-to-cluster.html">From Micro-Pilot Profiling to Load-Balanced SLURM Arrays</a></li>
     <li><a class="dropdown-item" href="../articles/apptainer-ssh-shiny.html">Apptainer Packaging, Remote SSH/SLURM &amp; Non-Blocking Shiny Offloading</a></li>
     <li><a class="dropdown-item" href="../articles/troubleshooting-and-retries.html">Troubleshooting, Adaptive Retries &amp; Reproducible Parallel RNG</a></li>
+    <li><a class="dropdown-item" href="../articles/pipelines-and-efficiency.html">Multi-Stage HPC Pipelines, Efficiency Auditing &amp; Container Handoff</a></li>
   </ul></li>
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-pdfs" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">PDFs</button>
@@ -58,7 +59,8 @@
 <span>  mem_limit_mb <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  time_limit_sec <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  fault_injection <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span><span class="op">)</span>,</span>
-<span>  rscript_bin <span class="op">=</span> <span class="cn">NULL</span></span>
+<span>  rscript_bin <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  scrub_secrets <span class="op">=</span> <span class="cn">TRUE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -100,6 +102,11 @@ default <code>TRUE</code>).</p></dd>
 <dd><p>Optional explicit path to <code>Rscript</code>. Defaults to the active
 R installation's <code>Rscript</code>.</p></dd>
 
+
+<dt id="arg-scrub-secrets">scrub_secrets<a class="anchor" aria-label="anchor" href="#arg-scrub-secrets"></a></dt>
+<dd><p>Logical; scrub ambient host credential environment
+variables before spawning workers. Default <code>TRUE</code>.</p></dd>
+
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
@@ -110,7 +117,7 @@ R installation's <code>Rscript</code>.</p></dd>
     <h2 id="ref-examples">Examples<a class="anchor" aria-label="anchor" href="#ref-examples"></a></h2>
     <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="va">backend</span> <span class="op">&lt;-</span> <span class="fu">mock_slurm_backend</span><span class="op">(</span>max_workers <span class="op">=</span> <span class="fl">2L</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="va">backend</span><span class="op">)</span></span></span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> &lt;<span style="color: #0000BB;">&lt;MockSlurmBackend&gt;</span>&gt; root=<span style="color: #0000BB;">/tmp/RtmpamJPcO/slurmpilot_mock_189e68c34347</span>,</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> &lt;<span style="color: #0000BB;">&lt;MockSlurmBackend&gt;</span>&gt; root=<span style="color: #0000BB;">/tmp/RtmpY5vFEo/slurmpilot_mock_17e06c366a6</span>,</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> max_workers=2, jobs=0, active_workers=0</span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/unlink.html" class="external-link">unlink</a></span><span class="op">(</span><span class="va">backend</span><span class="op">$</span><span class="va">root_dir</span>, recursive <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></span>
 </code></pre></div>

@@ -13,7 +13,8 @@ mock_slurm_backend(
   mem_limit_mb = NULL,
   time_limit_sec = NULL,
   fault_injection = list(),
-  rscript_bin = NULL
+  rscript_bin = NULL,
+  scrub_secrets = TRUE
 )
 ```
 
@@ -54,6 +55,11 @@ mock_slurm_backend(
   Optional explicit path to `Rscript`. Defaults to the active R
   installation's `Rscript`.
 
+- scrub_secrets:
+
+  Logical; scrub ambient host credential environment variables before
+  spawning workers. Default `TRUE`.
+
 ## Value
 
 A
@@ -65,7 +71,7 @@ R6 object.
 ``` r
 backend <- mock_slurm_backend(max_workers = 2L)
 print(backend)
-#> <<MockSlurmBackend>> root=/tmp/RtmpamJPcO/slurmpilot_mock_189e68c34347,
+#> <<MockSlurmBackend>> root=/tmp/RtmpY5vFEo/slurmpilot_mock_17e06c366a6,
 #> max_workers=2, jobs=0, active_workers=0
 unlink(backend$root_dir, recursive = TRUE)
 ```

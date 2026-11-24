@@ -7,7 +7,7 @@ task indices.
 ## Usage
 
 ``` r
-parse_slurm_array_spec(expr)
+parse_slurm_array_spec(expr, max_indices = 100000L)
 ```
 
 ## Arguments
@@ -15,6 +15,11 @@ parse_slurm_array_spec(expr)
 - expr:
 
   Character scalar SLURM array expression.
+
+- max_indices:
+
+  Positive integer upper bound on the total number of expanded array
+  indices (guards against unbounded range expansion). Default `100000L`.
 
 ## Value
 

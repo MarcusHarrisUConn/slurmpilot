@@ -7,9 +7,10 @@ peak resident memory and runtime distributions, computes optimal 'SLURM'
 array chunking (including Longest Processing Time load balancing) and
 resource flags, audits closures and globals before staging, scans
 project environments to emit reproducible 'Apptainer' container recipes
-and batch scripts, orchestrates remote 'SSH'/'SLURM' or local parallel
-mock-'SLURM' execution with atomic SHA-256 checkpoints, independent
-parallel random-number streams, and adaptive surgical retries, and
+and batch scripts, orchestrates single-stage and multi-stage dependent
+job DAGs over remote 'SSH'/'SLURM' or local parallel mock-'SLURM' with
+atomic SHA-256 checkpoints, independent parallel random-number streams,
+adaptive surgical retries, and post-mortem efficiency auditing, and
 provides non-blocking 'bslib'/'Shiny' telemetry modules.
 
 ## See also

@@ -90,7 +90,7 @@ rep <- inspect_job_globals(make_worker(), args_list = as.list(1:5))
 print(rep)
 #> 
 #> ── slurmpilot Pre-Submit Globals & Bundle Audit [OK] 
-#> • Estimated payload size: 0.00 MB (closure=0.00 MB, globals=0.00 MB, args=0.00
+#> • Estimated payload size: 9.09 MB (closure=0.00 MB, globals=0.00 MB, args=0.00
 #>   MB)
 #> • Captured local closure objects: 4 | Explicit globals: 0
 #> • Unresolved variables: 0 | Unexported functions: 0

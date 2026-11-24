@@ -39,7 +39,7 @@ slurm_wait(job, poll_interval = 0.05)
 #> ── slurmpilot Job Status: slurmpilot_job [COMPLETED] 
 #> • Progress: 2/2 chunks (100%) | running=0, pending=0, failed=0, oom=0,
 #>   timeout=0, cancelled=0
-#> • Peak RSS max: 113.1 MB | Cumulative walltime: 1.08s
+#> • Peak RSS max: 120.5 MB | Cumulative walltime: 0.97s
 slurm_retry_history(job)
 #> # A tibble: 0 × 9
 #> # ℹ 9 variables: retry_round <int>, timestamp <chr>, chunk_id <int>,
