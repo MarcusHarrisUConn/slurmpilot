@@ -374,6 +374,8 @@ render_worker_script <- function(output_path = NULL) {
 #' @param extra_sbatch Optional character vector of extra `#SBATCH` flags
 #'   (without leading `#SBATCH`; `--wrap` and shell metacharacters are
 #'   forbidden).
+#' @param dependency Optional SLURM `--dependency` string (e.g.
+#'   `"afterok:12345"` or `"afterok:12345:12346"`) for multi-stage job DAGs.
 #' @param output_path Optional file path to write the rendered `.sbatch` script.
 #'
 #' @return An S3 object of class `"slurmpilot_sbatch"` with `script` (character
@@ -402,6 +404,7 @@ render_sbatch_script <- function(
   mail_user = NULL,
   mail_type = NULL,
   extra_sbatch = character(),
+  dependency = NULL,
   output_path = NULL
 ) {
   checkmate::assert_string(job_name, min.chars = 1L)
@@ -430,6 +433,9 @@ render_sbatch_script <- function(
   if (!is.null(mail_user)) sp_assert_safe_email(mail_user, arg = "mail_user")
   if (!is.null(mail_type)) mail_type <- sp_assert_safe_mail_type(mail_type, arg = "mail_type")
   sp_assert_safe_extra_sbatch(extra_sbatch, arg = "extra_sbatch")
+  if (!is.null(dependency)) {
+    sp_assert_safe_slurm_dependency(dependency, arg = "dependency", allow_dry_run = TRUE)
+  }
   if (!is.null(output_path)) {
     checkmate::assert_string(output_path, min.chars = 1L)
     sp_assert_no_control_chars(output_path, arg = "output_path")
@@ -467,6 +473,9 @@ render_sbatch_script <- function(
   }
   if (!is.null(mail_type)) {
     header <- c(header, paste0("#SBATCH --mail-type=", mail_type))
+  }
+  if (!is.null(dependency)) {
+    header <- c(header, paste0("#SBATCH --dependency=", dependency))
   }
   if (length(extra_sbatch) > 0L) {
     header <- c(header, paste0("#SBATCH ", trimws(extra_sbatch)))

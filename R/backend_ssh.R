@@ -198,6 +198,7 @@ parse_squeue_output <- function(stdout) {
       base_id <- raw_id
       cids <- 1L
     }
+    if (!grepl("^[0-9]+$", base_id)) next
 
     for (cid in cids) {
       rows[[length(rows) + 1L]] <- tibble::tibble(
@@ -276,6 +277,7 @@ parse_sacct_output <- function(stdout) {
       base_id <- clean_id
       cid <- 1L
     }
+    if (!grepl("^[0-9]+$", base_id)) next
 
     state <- sp_normalize_slurm_state(fields[[2L]])
     elapsed_sec <- if (length(fields) >= 3L) parse_slurm_time(fields[[3L]]) else NA_real_
@@ -507,10 +509,15 @@ SlurmSshBackend <- R6::R6Class(
 
     #' @description Stage and submit a SLURM array job over SSH/SCP.
     #' @param job_spec A `slurmpilot_job_spec` object.
+    #' @param dependency Optional SLURM `--dependency` string (e.g. `"afterok:12345"`).
     #' @param ... Unused.
     #' @return A `slurmpilot_job` handle.
-    submit = function(job_spec, ...) {
+    submit = function(job_spec, dependency = NULL, ...) {
       checkmate::assert_class(job_spec, "slurmpilot_job_spec")
+      if (!is.null(dependency)) {
+        sp_assert_safe_slurm_dependency(dependency, arg = "dependency", allow_dry_run = isTRUE(self$dry_run))
+        job_spec$dependency <- dependency
+      }
 
       # Apply backend defaults for partition/account/qos if unset on resources
       res <- job_spec$resources

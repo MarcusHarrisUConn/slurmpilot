@@ -1,3 +1,37 @@
+# slurmpilot 0.4.0
+
+## New Research-Workflow Capabilities
+- **Multi-Stage Dependent HPC Job DAGs (`slurm_stage()`, `slurm_pipeline()`, `slurm_pipeline_run()`, `slurm_pipeline_status()`, `slurm_pipeline_collect()`):**
+  Define linear, fan-out, fan-in, and diamond job DAGs with Kahn topological
+  sorting and explicit cycle/self-loop detection. Emits validated SLURM
+  `#SBATCH --dependency=afterok:<ids>` flags (`afterok`, `afterany`,
+  `afternotok`) on `SlurmSshBackend` and executes full multi-stage pipelines
+  locally end-to-end on `MockSlurmBackend` with upstream output forwarding.
+- **Post-Mortem Resource Efficiency Auditor (`slurm_efficiency_report()`, `plot.slurmpilot_efficiency()`):**
+  Compares requested `--mem` and `--time` against empirical Peak RSS and
+  walltime from `MockSlurmBackend` telemetry or `parse_sacct_output()` tables,
+  quantifying memory waste %, walltime slack %, and straggler imbalance ratio,
+  and recommending a concrete tightened (or escalated) `resource_spec()` for
+  the next run.
+- **Zero-Dependency Container Integration Hook (`use_rcapsule_container()`):**
+  Accepts `.sif` / `.def` file paths, `slurmpilot_apptainer_def` recipes, or
+  duck-typed `rcapsule` specs/manifests (with zero hard dependency) to validate
+  paths and bind mounts strictly and attach provenance metadata and
+  `SLURMPILOT_CONTAINER_DIGEST` to `slurm_job_spec()`.
+
+## Coverage-Driven Bug Fixes & Quality
+- Fixed subscript-out-of-bounds crash in `verify_checkpoint()` when a `.sha256`
+  sidecar file is blank or whitespace-only.
+- Fixed `parse_sacct_output()` and `parse_squeue_output()` misparsing non-numeric
+  header rows when raw headered scheduler output is passed.
+- Fixed `MockSlurmBackend$retry()` dropping `container_sif`, `modules`, and
+  `env_vars` when regenerating `retry_<k>.sbatch` and carrying over previous
+  attempt `peak_rss_mb`.
+- Fixed `mod_hpc_monitor_server()` wiping collected `results()` on an accidental
+  retry click against an already-`COMPLETED` job.
+- Added a fifth executable vignette (`vignettes/pipelines-and-efficiency.Rmd`) and
+  drove test suite coverage above 93% via `covr`.
+
 # slurmpilot 0.3.0
 
 ## Workflow Hardening & New Capabilities

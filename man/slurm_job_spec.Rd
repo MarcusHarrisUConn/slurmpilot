@@ -14,8 +14,10 @@ slurm_job_spec(
   seed = NULL,
   continue_on_error = FALSE,
   container_sif = NULL,
+  container_binds = character(),
   modules = character(),
   env_vars = list(),
+  dependency = NULL,
   warn_bundle_mb = 50
 )
 }
@@ -41,9 +43,14 @@ even if individual tasks error. Default \code{FALSE}.}
 
 \item{container_sif}{Optional path to Apptainer \code{.sif} image.}
 
+\item{container_binds}{Optional character vector of Apptainer \code{--bind} mounts.}
+
 \item{modules}{Optional character vector of HPC modules to load.}
 
 \item{env_vars}{Optional named list/vector of extra environment variables.}
+
+\item{dependency}{Optional SLURM \code{--dependency} string (e.g.
+\code{"afterok:12345"}).}
 
 \item{warn_bundle_mb}{Optional numeric size threshold in MB (default \code{50});
 emits a diagnostic warning if the serialized payload (\code{fun}, closure,
@@ -67,5 +74,6 @@ spec <- slurm_job_spec(
 print(spec)
 }
 \seealso{
-\code{\link[=slurm_submit]{slurm_submit()}}, \code{\link[=estimate_resources]{estimate_resources()}}, \code{\link[=inspect_job_globals]{inspect_job_globals()}}
+\code{\link[=slurm_submit]{slurm_submit()}}, \code{\link[=estimate_resources]{estimate_resources()}}, \code{\link[=inspect_job_globals]{inspect_job_globals()}},
+\code{\link[=use_rcapsule_container]{use_rcapsule_container()}}
 }

@@ -1,16 +1,7 @@
 # User-facing S3 job specification, job handle, lifecycle API & autopilot
 
-new_slurmpilot_job <- function(
-  job_id,
-  job_name,
-  backend,
-  resources,
-  local_dir,
-  remote_dir = NULL,
-  scheduler_ids = character(),
-  spec = NULL,
-  meta = list(),
-  retry_history = tibble::tibble(
+sp_empty_retry_history <- function() {
+  tibble::tibble(
     retry_round = integer(),
     timestamp = character(),
     chunk_id = integer(),
@@ -21,6 +12,19 @@ new_slurmpilot_job <- function(
     new_time_sec = integer(),
     adaptive = logical()
   )
+}
+
+new_slurmpilot_job <- function(
+  job_id,
+  job_name,
+  backend,
+  resources,
+  local_dir,
+  remote_dir = NULL,
+  scheduler_ids = character(),
+  spec = NULL,
+  meta = list(),
+  retry_history = sp_empty_retry_history()
 ) {
   structure(
     list(
@@ -58,14 +62,18 @@ new_slurmpilot_job <- function(
 #' @param continue_on_error Logical; if `TRUE`, writes partial chunk checkpoints
 #'   even if individual tasks error. Default `FALSE`.
 #' @param container_sif Optional path to Apptainer `.sif` image.
+#' @param container_binds Optional character vector of Apptainer `--bind` mounts.
 #' @param modules Optional character vector of HPC modules to load.
 #' @param env_vars Optional named list/vector of extra environment variables.
+#' @param dependency Optional SLURM `--dependency` string (e.g.
+#'   `"afterok:12345"`).
 #' @param warn_bundle_mb Optional numeric size threshold in MB (default `50`);
 #'   emits a diagnostic warning if the serialized payload (`fun`, closure,
 #'   `args_list`, `globals`) exceeds this threshold. Set `Inf` to disable.
 #'
 #' @return An S3 object of class `"slurmpilot_job_spec"`.
-#' @seealso [slurm_submit()], [estimate_resources()], [inspect_job_globals()]
+#' @seealso [slurm_submit()], [estimate_resources()], [inspect_job_globals()],
+#'   [use_rcapsule_container()]
 #' @export
 #' @examples
 #' spec <- slurm_job_spec(
@@ -85,8 +93,10 @@ slurm_job_spec <- function(
   seed = NULL,
   continue_on_error = FALSE,
   container_sif = NULL,
+  container_binds = character(),
   modules = character(),
   env_vars = list(),
+  dependency = NULL,
   warn_bundle_mb = 50
 ) {
   checkmate::assert_function(fun)
@@ -122,7 +132,11 @@ slurm_job_spec <- function(
   if (!is.null(container_sif)) {
     sp_assert_safe_path(container_sif, arg = "container_sif", allow_tilde = FALSE, allow_relative = FALSE)
   }
+  sp_assert_safe_apptainer_bind(container_binds, arg = "container_binds")
   sp_assert_safe_module_name(modules, arg = "modules")
+  if (!is.null(dependency)) {
+    sp_assert_safe_slurm_dependency(dependency, arg = "dependency", allow_dry_run = TRUE)
+  }
   if (length(env_vars) > 0L) {
     ev_names <- names(env_vars)
     if (is.null(ev_names) || any(!nzchar(ev_names))) {
@@ -162,8 +176,11 @@ slurm_job_spec <- function(
       seed = seed,
       continue_on_error = continue_on_error,
       container_sif = container_sif,
+      container_binds = container_binds,
+      container_meta = NULL,
       modules = modules,
-      env_vars = env_vars
+      env_vars = env_vars,
+      dependency = dependency
     ),
     class = "slurmpilot_job_spec"
   )
@@ -371,17 +388,7 @@ slurm_retry <- function(
 
   prev_hist <- job$retry_history
   if (is.null(prev_hist) || !is.data.frame(prev_hist)) {
-    prev_hist <- tibble::tibble(
-      retry_round = integer(),
-      timestamp = character(),
-      chunk_id = integer(),
-      trigger_state = character(),
-      old_mem_mb = integer(),
-      new_mem_mb = integer(),
-      old_time_sec = integer(),
-      new_time_sec = integer(),
-      adaptive = logical()
-    )
+    prev_hist <- sp_empty_retry_history()
   }
 
   job_out <- job$backend$retry(job, chunks = target_chunks, resources = resources)
@@ -436,17 +443,7 @@ slurm_retry_history <- function(job) {
   if (!is.null(job$retry_history) && is.data.frame(job$retry_history)) {
     return(tibble::as_tibble(job$retry_history))
   }
-  tibble::tibble(
-    retry_round = integer(),
-    timestamp = character(),
-    chunk_id = integer(),
-    trigger_state = character(),
-    old_mem_mb = integer(),
-    new_mem_mb = integer(),
-    old_time_sec = integer(),
-    new_time_sec = integer(),
-    adaptive = logical()
-  )
+  sp_empty_retry_history()
 }
 
 #' Cancel Active Chunks of a Submitted Job

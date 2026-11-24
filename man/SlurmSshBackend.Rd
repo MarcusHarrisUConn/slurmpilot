@@ -148,13 +148,14 @@ unlink(ssh$local_stage_dir, recursive = TRUE)
   Stage and submit a SLURM array job over SSH/SCP.
   \subsection{Usage}{
     \if{html}{\out{<div class="r">}}
-    \preformatted{SlurmSshBackend$submit(job_spec, ...)}
+    \preformatted{SlurmSshBackend$submit(job_spec, dependency = NULL, ...)}
     \if{html}{\out{</div>}}
   }
   \subsection{Arguments}{
     \if{html}{\out{<div class="arguments">}}
     \describe{
       \item{\code{job_spec}}{A \code{slurmpilot_job_spec} object.}
+      \item{\code{dependency}}{Optional SLURM \code{--dependency} string (e.g. \code{"afterok:12345"}).}
       \item{\code{...}}{Unused.}
     }
     \if{html}{\out{</div>}}

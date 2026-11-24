@@ -152,6 +152,7 @@ MockSlurmBackend <- R6::R6Class(
         job_name = job_spec$name,
         job_dir = job_dir,
         resources = job_spec$resources,
+        job_spec = job_spec,
         staged = staged,
         fault_injection = fi,
         chunks = chunk_records,
@@ -261,6 +262,7 @@ MockSlurmBackend <- R6::R6Class(
         ch$started_mono <- NA_real_
         ch$eligible_at <- now + self$queue_delay
         ch$wall_sec <- NA_real_
+        ch$peak_rss_mb <- NA_real_
         ch$exit_code <- NA_integer_
         ch$error_message <- NA_character_
         ch$checkpoint_exists <- FALSE
@@ -273,13 +275,18 @@ MockSlurmBackend <- R6::R6Class(
         unlink(paste0(res_f, ".sha256"), force = TRUE)
       }
 
-      # Emit retry sbatch script for parity with SLURM workflow
+      # Emit retry sbatch script preserving container/module/env settings
+      js <- rec$job_spec
       render_sbatch_script(
         job_name = rec$job_name,
         resources = rec$resources,
         work_dir = rec$job_dir,
         array_indices = chunks,
         attempt = max_attempt,
+        container_sif = if (!is.null(js)) js$container_sif else NULL,
+        container_binds = if (!is.null(js)) js$container_binds %||% character() else character(),
+        modules = if (!is.null(js)) js$modules %||% character() else character(),
+        env_vars = if (!is.null(js)) js$env_vars %||% list() else list(),
         output_path = file.path(rec$job_dir, sprintf("retry_%d.sbatch", max_attempt))
       )
 

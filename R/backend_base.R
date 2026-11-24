@@ -43,6 +43,7 @@ sp_stage_job_bundle <- function(
   render_worker_script(output_path = worker_path)
 
   effective_sif <- job_spec$container_sif %||% container_sif
+  effective_binds <- unique(c(container_binds, job_spec$container_binds %||% character()))
   effective_modules <- unique(c(modules, job_spec$modules))
   sbatch_path <- file.path(local_job_dir, "submit.sbatch")
   sbatch_obj <- render_sbatch_script(
@@ -52,9 +53,10 @@ sp_stage_job_bundle <- function(
     worker_script = "worker.R",
     attempt = 1L,
     container_sif = effective_sif,
-    container_binds = container_binds,
+    container_binds = effective_binds,
     modules = effective_modules,
     env_vars = job_spec$env_vars,
+    dependency = job_spec$dependency,
     output_path = sbatch_path
   )
 

@@ -72,6 +72,7 @@ run <- slurm_autopilot(
 - `vignette("pilot-to-cluster", package = "slurmpilot")`
 - `vignette("apptainer-ssh-shiny", package = "slurmpilot")`
 - `vignette("troubleshooting-and-retries", package = "slurmpilot")`
+- `vignette("pipelines-and-efficiency", package = "slurmpilot")`
 - Architecture & security audit: see `ARCHITECTURE.md` and `SECURITY.md`
 
 ## License

@@ -34,10 +34,11 @@ articles:
       - pilot-to-cluster
       - apptainer-ssh-shiny
       - troubleshooting-and-retries
+      - pipelines-and-efficiency
 
 reference:
   - title: Micro-Pilot Profiling & Resource Sizing
-    desc: Empirically profile OS RSS & runtime, size SLURM arrays, load-balance heterogeneous workloads, and audit closures.
+    desc: Empirically profile OS RSS & runtime, size SLURM arrays, load-balance heterogeneous workloads, audit closures, and inspect post-mortem efficiency.
     contents:
       - pilot_run
       - plot.slurmpilot_pilot
@@ -47,9 +48,11 @@ reference:
       - as_slurm_flags
       - plan_chunks
       - inspect_job_globals
+      - slurm_efficiency_report
+      - plot.slurmpilot_efficiency
 
-  - title: Job Lifecycle & Autopilot
-    desc: User-facing S3 workflow API for submitting, monitoring, retrying, cancelling, and collecting array jobs.
+  - title: Multi-Stage Pipelines & Job Lifecycle
+    desc: User-facing S3 workflow API for single-stage jobs, autopilot runs, and multi-stage dependent HPC DAGs.
     contents:
       - slurm_autopilot
       - slurm_job_spec
@@ -61,6 +64,11 @@ reference:
       - slurm_cancel
       - slurm_logs
       - slurm_collect
+      - slurm_stage
+      - slurm_pipeline
+      - slurm_pipeline_run
+      - slurm_pipeline_status
+      - slurm_pipeline_collect
 
   - title: Scheduler Backends
     desc: Pluggable R6 scheduler interface with a local parallel mock SLURM simulator and production SSH/SLURM adapter.
@@ -71,12 +79,13 @@ reference:
       - SlurmSshBackend
       - slurm_ssh_backend
 
-  - title: HPC Environment, Apptainer & Batch Scripts
-    desc: Scan dependencies, detect compiled toolchains, and emit reproducible Apptainer .def recipes, sbatch scripts, and standalone workers.
+  - title: HPC Environment, Apptainer & Container Handoff
+    desc: Scan dependencies, detect compiled toolchains, emit reproducible Apptainer .def recipes and sbatch scripts, and attach rcapsule containers.
     contents:
       - scan_project_env
       - toolchain_registry
       - build_apptainer_def
+      - use_rcapsule_container
       - render_sbatch_script
       - render_worker_script
 

@@ -160,6 +160,27 @@ sp_assert_safe_slurm_job_id <- function(x, arg = "slurm_job_id", allow_dry_run =
   invisible(jid)
 }
 
+sp_assert_safe_slurm_dependency <- function(x, arg = "dependency", allow_dry_run = FALSE) {
+  checkmate::assert_string(x, min.chars = 1L)
+  sp_assert_no_control_chars(x, arg = arg)
+  clauses <- strsplit(x, ",", fixed = TRUE)[[1L]]
+  if (length(clauses) == 0L || any(!nzchar(clauses))) {
+    cli::cli_abort("Invalid SLURM {.arg {arg}} specification: {.val {x}}.")
+  }
+  id_pat <- if (isTRUE(allow_dry_run)) "(?:[0-9]{1,20}|DRY_RUN(?:_R[0-9]+)?)" else "[0-9]{1,20}"
+  clause_pat <- paste0(
+    "^(?:singleton|(?:after|afterany|afterburstbuffer|aftercorr|afternotok|afterok)(?::",
+    id_pat,
+    ")+)$"
+  )
+  for (cl in clauses) {
+    if (!grepl(clause_pat, cl, perl = TRUE)) {
+      cli::cli_abort("Unsafe or invalid SLURM {.arg {arg}} clause: {.val {cl}}.")
+    }
+  }
+  invisible(x)
+}
+
 sp_assert_safe_ssh_host <- function(x, arg = "host") {
   checkmate::assert_string(x, min.chars = 1L)
   sp_assert_no_control_chars(x, arg = arg)
@@ -383,7 +404,10 @@ verify_checkpoint <- function(result_path, expected_sha256 = NULL, require_sidec
   if (file.exists(sidecar_path)) {
     raw_sidecar <- tryCatch(readLines(sidecar_path, warn = FALSE), error = function(e) character())
     if (length(raw_sidecar) > 0L) {
-      sidecar_sha <- tolower(trimws(strsplit(trimws(raw_sidecar[[1L]]), "\\s+")[[1L]][[1L]]))
+      tokens <- strsplit(trimws(raw_sidecar[[1L]]), "\\s+")[[1L]]
+      sidecar_sha <- if (length(tokens) > 0L && nzchar(tokens[[1L]])) tolower(tokens[[1L]]) else ""
+    } else {
+      sidecar_sha <- ""
     }
   }
 

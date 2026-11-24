@@ -219,6 +219,8 @@ mod_hpc_monitor_server <- function(
     shiny::observeEvent(input$retry_failed, {
       j <- active_job_rv()
       if (is.null(j)) return()
+      cur_st <- shiny::isolate(status_rv())
+      if (!is.null(cur_st) && identical(cur_st$n_retryable, 0L)) return()
       if (retry_count_rv() >= max_retries) {
         shiny::showNotification(
           sprintf("Retry cap (%d) reached for this job.", max_retries),

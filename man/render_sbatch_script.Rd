@@ -19,6 +19,7 @@ render_sbatch_script(
   mail_user = NULL,
   mail_type = NULL,
   extra_sbatch = character(),
+  dependency = NULL,
   output_path = NULL
 )
 }
@@ -64,6 +65,9 @@ stdout/stderr logs. Default \code{"logs"}.}
 \item{extra_sbatch}{Optional character vector of extra \verb{#SBATCH} flags
 (without leading \verb{#SBATCH}; \code{--wrap} and shell metacharacters are
 forbidden).}
+
+\item{dependency}{Optional SLURM \code{--dependency} string (e.g.
+\code{"afterok:12345"} or \code{"afterok:12345:12346"}) for multi-stage job DAGs.}
 
 \item{output_path}{Optional file path to write the rendered \code{.sbatch} script.}
 }

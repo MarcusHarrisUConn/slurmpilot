@@ -2,7 +2,7 @@
 title: "slurmpilot: HPC Field Guide & Quick Reference"
 subtitle: "Auto-Profiling SLURM Orchestration, Apptainer Packaging, and Non-Blocking Shiny Offloading"
 author: "Marcus Harris"
-date: "Version 0.3.0 (2026)"
+date: "Version 0.4.0 (2026)"
 output:
   pdf_document:
     toc: true
@@ -97,18 +97,28 @@ if (st$n_retryable > 0L) {
 results <- slurm_collect(job, simplify = TRUE)
 ```
 
-## 3. One-Call Autopilot
+## 3. One-Call Autopilot, Multi-Stage DAGs & Efficiency Auditing
 
 ```r
+# One-call autopilot
 run <- slurm_autopilot(
-  fun = worker_fun,
-  args_list = tasks,
-  backend = be_local,
-  n_pilot = 3L,
-  strategy = "lpt",
-  auto_retry = 2L,
-  simplify = TRUE
+  fun = worker_fun, args_list = tasks, backend = be_local,
+  n_pilot = 3L, strategy = "lpt", auto_retry = 2L, simplify = TRUE
 )
+
+# Multi-stage dependent DAG (emits #SBATCH --dependency=afterok:... on SLURM)
+s1 <- slurm_stage("sim", fun = worker_fun, args_list = tasks)
+s2 <- slurm_stage("agg", fun = function(up) mean(up$sim$power), depends_on = "sim")
+dag_run <- slurm_pipeline_run(slurm_pipeline(s1, s2), backend = be_local)
+slurm_pipeline_collect(dag_run)
+
+# Post-mortem efficiency audit & tightened next-run resource recommendation
+eff <- slurm_efficiency_report(run)
+plot(eff, engine = "base")
+next_resources <- eff$recommended_resources
+
+# Zero-dependency rcapsule / Apptainer container handoff
+spec <- use_rcapsule_container(slurm_job_spec(worker_fun, tasks), container = "/scratch/env.sif")
 ```
 
 # Apptainer & SLURM Batch Packaging
