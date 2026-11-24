@@ -196,8 +196,12 @@ render_worker_script <- function(output_path = NULL) {
     "}",
     "task_indices <- chunks$task_indices[[row_idx]]",
     "",
-    "# Optional mock fault injection (used strictly by MockSlurmBackend tests/demos)",
-    "mock_fault <- Sys.getenv('SLURMPILOT_MOCK_FAULT', unset = '')",
+    "# Optional mock fault injection (gated strictly to MockSlurmBackend)",
+    "mock_fault <- if (identical(Sys.getenv('SLURMPILOT_BACKEND', unset = ''), 'mock')) {",
+    "  Sys.getenv('SLURMPILOT_MOCK_FAULT', unset = '')",
+    "} else {",
+    "  ''",
+    "}",
     "if (nzchar(mock_fault)) {",
     "  wall_sec <- max(0, proc.time()[['elapsed']] - t0)",
     "  if (mock_fault == 'OOM') {",
@@ -449,6 +453,13 @@ render_sbatch_script <- function(
     for (i in seq_along(env_vars)) {
       sp_assert_no_control_chars(as.character(env_vars[[i]]), arg = paste0("env_vars$", ev_names[[i]]))
     }
+    sec_hits <- ev_names[sp_is_secret_env_name(ev_names)]
+    if (length(sec_hits) > 0L) {
+      sec_str <- paste(sec_hits, collapse = ", ")
+      cli::cli_warn(
+        "Environment variable(s) in {.arg env_vars} match secret/credential naming patterns ({sec_str}); avoid embedding secrets in plaintext {.code .sbatch} scripts."
+      )
+    }
   }
 
   # Re-validate optional SLURM scheduler tokens on resources before emitting #SBATCH lines
@@ -460,7 +471,9 @@ render_sbatch_script <- function(
   flags <- as_slurm_flags(resources, array_indices = array_indices)
   array_spec <- sub("^--array=", "", flags[grepl("^--array=", flags)][[1L]])
 
-  log_path_prefix <- file.path(work_dir, log_dir)
+  # SLURM does not expand '~' in #SBATCH --output/--error; rewrite '~/...' relative to $HOME
+  sbatch_log_base <- if (startsWith(work_dir, "~/")) sub("^~/", "", work_dir) else work_dir
+  log_path_prefix <- file.path(sbatch_log_base, log_dir)
   header <- c(
     "#!/usr/bin/env bash",
     paste0("#SBATCH --job-name=", safe_name),
@@ -485,7 +498,7 @@ render_sbatch_script <- function(
     "",
     "set -euo pipefail",
     "",
-    paste0("WORK_DIR=", sp_sh_quote(work_dir)),
+    paste0("WORK_DIR=", sp_sh_quote_path(work_dir)),
     "mkdir -p \"${WORK_DIR}/logs\" \"${WORK_DIR}/results\" \"${WORK_DIR}/status\"",
     "cd \"${WORK_DIR}\""
   )
@@ -520,8 +533,37 @@ render_sbatch_script <- function(
 
   worker_arg <- if (grepl("^/", worker_script)) worker_script else file.path("${WORK_DIR}", worker_script)
   exec_line <- if (!is.null(container_sif)) {
-    all_binds <- unique(c(paste0(work_dir, ":", work_dir), container_binds))
-    bind_flags <- paste(vapply(all_binds, function(b) paste0("--bind ", sp_sh_quote(b)), character(1L)), collapse = " ")
+    # Forward thread caps, runtime metadata, and user env_vars across apptainer --cleanenv
+    body <- c(
+      body,
+      paste0("export APPTAINERENV_OMP_NUM_THREADS=", resources$cpus_per_task),
+      paste0("export APPTAINERENV_OPENBLAS_NUM_THREADS=", resources$cpus_per_task),
+      paste0("export APPTAINERENV_MKL_NUM_THREADS=", resources$cpus_per_task),
+      "export APPTAINERENV_SLURMPILOT_WORK_DIR=\"${WORK_DIR}\"",
+      "export APPTAINERENV_SLURMPILOT_CHUNK_ID=\"${SLURM_ARRAY_TASK_ID}\"",
+      paste0("export APPTAINERENV_SLURMPILOT_ATTEMPT=", attempt)
+    )
+    if (length(env_vars) > 0L) {
+      ev_names <- names(env_vars)
+      for (i in seq_along(env_vars)) {
+        body <- c(
+          body,
+          sprintf("export APPTAINERENV_%s=%s", ev_names[[i]], sp_sh_quote(as.character(env_vars[[i]])))
+        )
+      }
+    }
+    work_bind_flag <- if (startsWith(work_dir, "~/")) {
+      "--bind \"${WORK_DIR}:${WORK_DIR}\""
+    } else {
+      paste0("--bind ", sp_sh_quote(paste0(work_dir, ":", work_dir)))
+    }
+    extra_bind_flags <- vapply(
+      setdiff(unique(container_binds), paste0(work_dir, ":", work_dir)),
+      function(b) paste0("--bind ", sp_sh_quote(b)),
+      character(1L),
+      USE.NAMES = FALSE
+    )
+    bind_flags <- paste(c(work_bind_flag, extra_bind_flags), collapse = " ")
     sprintf(
       "apptainer exec --cleanenv %s %s Rscript \"%s\" --work-dir \"${WORK_DIR}\" --chunk-id \"${SLURM_ARRAY_TASK_ID}\" --attempt \"%d\"",
       bind_flags,
@@ -548,6 +590,7 @@ render_sbatch_script <- function(
 
   if (!is.null(output_path)) {
     sp_write_lines_atomic(lines, output_path)
+    try(Sys.chmod(output_path, mode = "0600"), silent = TRUE)
   }
 
   structure(

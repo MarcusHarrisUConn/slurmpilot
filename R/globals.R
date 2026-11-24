@@ -1,5 +1,79 @@
 # Pre-submit closure, globals, and bundle size diagnostics
 
+sp_serialized_size_mb <- function(x) {
+  tryCatch(
+    as.numeric(length(serialize(x, connection = NULL))) / (1024^2),
+    error = function(e) as.numeric(utils::object.size(x)) / (1024^2)
+  )
+}
+
+sp_has_nonempty_secret_value <- function(val) {
+  if (is.null(val)) return(FALSE)
+  if (is.environment(val)) return(length(ls(val, all.names = TRUE)) > 0L)
+  if (is.atomic(val)) return(length(val) > 0L && any(!is.na(val) & nzchar(as.character(val))))
+  length(val) > 0L
+}
+
+sp_scan_nested_secrets <- function(obj, prefix = "", max_depth = 6L, seen_envs = NULL) {
+  if (is.null(seen_envs)) {
+    seen_envs <- new.env(parent = emptyenv())
+  }
+  found <- character(0L)
+  if (max_depth <= 0L || is.null(obj) || inherits(obj, "slurmpilot_globals_report")) {
+    return(found)
+  }
+  if (is.environment(obj)) {
+    if (identical(obj, emptyenv()) || identical(obj, globalenv()) ||
+        identical(obj, baseenv()) || isNamespace(obj)) {
+      return(found)
+    }
+    eid <- format(obj)
+    if (exists(eid, envir = seen_envs, inherits = FALSE)) {
+      return(found)
+    }
+    assign(eid, TRUE, envir = seen_envs)
+    nms <- ls(envir = obj, all.names = TRUE)
+    for (nm in nms) {
+      full_nm <- if (nzchar(prefix)) paste0(prefix, "$", nm) else nm
+      if (bindingIsActive(nm, obj)) {
+        if (sp_is_secret_env_name(nm)) {
+          found <- c(found, full_nm)
+        }
+        next
+      }
+      val <- tryCatch(get(nm, envir = obj, inherits = FALSE), error = function(e) NULL)
+      if (sp_is_secret_env_name(nm) && sp_has_nonempty_secret_value(val)) {
+        found <- c(found, full_nm)
+      }
+      if (!inherits(val, "slurmpilot_globals_report") &&
+          (is.environment(val) || is.list(val) || inherits(val, "formula"))) {
+        found <- c(found, sp_scan_nested_secrets(val, prefix = full_nm, max_depth = max_depth - 1L, seen_envs = seen_envs))
+      }
+    }
+  } else if (inherits(obj, "formula")) {
+    fe <- environment(obj)
+    if (!is.null(fe)) {
+      found <- c(found, sp_scan_nested_secrets(fe, prefix = prefix, max_depth = max_depth - 1L, seen_envs = seen_envs))
+    }
+  } else if (is.list(obj) && !is.data.frame(obj)) {
+    nms <- names(obj)
+    for (i in seq_along(obj)) {
+      nm <- if (!is.null(nms) && nzchar(nms[[i]])) nms[[i]] else paste0("[[", i, "]]")
+      full_nm <- if (nzchar(prefix)) paste0(prefix, "$", nm) else nm
+      val <- obj[[i]]
+      if (!is.null(nms) && nzchar(nms[[i]]) && sp_is_secret_env_name(nms[[i]]) &&
+          sp_has_nonempty_secret_value(val)) {
+        found <- c(found, full_nm)
+      }
+      if (!inherits(val, "slurmpilot_globals_report") &&
+          (is.environment(val) || is.list(val) || inherits(val, "formula"))) {
+        found <- c(found, sp_scan_nested_secrets(val, prefix = full_nm, max_depth = max_depth - 1L, seen_envs = seen_envs))
+      }
+    }
+  }
+  unique(found)
+}
+
 sp_walk_closure_envs <- function(env) {
   envs <- list()
   cur <- env
@@ -90,10 +164,12 @@ inspect_job_globals <- function(
   checkmate::assert_character(packages, any.missing = FALSE)
   checkmate::assert_number(size_warn_mb, lower = 0.001, finite = TRUE)
 
-  # 1. Inspect lexical closure environments for captured objects
+  # 1. Inspect lexical closure environments for captured objects (active-binding & nested-env safe)
   closure_envs <- sp_walk_closure_envs(environment(fun))
   closure_rows <- list()
   closure_syms <- character(0L)
+  active_bindings <- character(0L)
+  secret_objects <- character(0L)
 
   for (idx in seq_along(closure_envs)) {
     env_i <- closure_envs[[idx]]
@@ -102,8 +178,33 @@ inspect_job_globals <- function(
     objs <- ls(envir = env_i, all.names = TRUE)
     closure_syms <- c(closure_syms, objs)
     for (nm in objs) {
+      if (bindingIsActive(nm, env_i)) {
+        active_bindings <- c(active_bindings, nm)
+        if (sp_is_secret_env_name(nm)) {
+          secret_objects <- c(secret_objects, nm)
+        }
+        closure_rows[[length(closure_rows) + 1L]] <- tibble::tibble(
+          name = nm,
+          class = "activeBinding",
+          size_mb = 0,
+          env_name = env_label
+        )
+        next
+      }
       val <- tryCatch(get(nm, envir = env_i, inherits = FALSE), error = function(e) NULL)
-      sz_mb <- as.numeric(utils::object.size(val)) / (1024^2)
+      if (sp_is_secret_env_name(nm) && sp_has_nonempty_secret_value(val)) {
+        secret_objects <- c(secret_objects, nm)
+      }
+      sz_mb <- if (is.environment(val) || inherits(val, "formula") || (is.list(val) && !is.data.frame(val))) {
+        max(as.numeric(utils::object.size(val)) / (1024^2), sp_serialized_size_mb(val))
+      } else {
+        as.numeric(utils::object.size(val)) / (1024^2)
+      }
+      if (!inherits(val, "slurmpilot_globals_report") &&
+          (is.environment(val) || is.list(val) || inherits(val, "formula"))) {
+        nested_sec <- sp_scan_nested_secrets(val, prefix = nm)
+        if (length(nested_sec) > 0L) secret_objects <- c(secret_objects, nested_sec)
+      }
       cls <- paste(class(val), collapse = "/")
       closure_rows[[length(closure_rows) + 1L]] <- tibble::tibble(
         name = nm,
@@ -121,14 +222,27 @@ inspect_job_globals <- function(
     tibble::tibble(name = character(), class = character(), size_mb = numeric(), env_name = character())
   }
 
-  # 2. Inspect explicit globals table
+  # 2. Inspect explicit globals table (also detect nested envs & secret names)
   globals_tbl <- if (length(globals) > 0L) {
     rows <- lapply(names(globals), function(nm) {
       val <- globals[[nm]]
+      if (sp_is_secret_env_name(nm) && sp_has_nonempty_secret_value(val)) {
+        secret_objects <<- c(secret_objects, nm)
+      }
+      if (!inherits(val, "slurmpilot_globals_report") &&
+          (is.environment(val) || is.list(val) || inherits(val, "formula"))) {
+        nested_sec <- sp_scan_nested_secrets(val, prefix = nm)
+        if (length(nested_sec) > 0L) secret_objects <<- c(secret_objects, nested_sec)
+      }
+      sz_mb <- if (is.environment(val) || inherits(val, "formula") || (is.list(val) && !is.data.frame(val))) {
+        max(as.numeric(utils::object.size(val)) / (1024^2), sp_serialized_size_mb(val))
+      } else {
+        as.numeric(utils::object.size(val)) / (1024^2)
+      }
       tibble::tibble(
         name = nm,
         class = paste(class(val), collapse = "/"),
-        size_mb = as.numeric(utils::object.size(val)) / (1024^2)
+        size_mb = sz_mb
       )
     })
     df <- do.call(rbind, rows)
@@ -136,6 +250,7 @@ inspect_job_globals <- function(
   } else {
     tibble::tibble(name = character(), class = character(), size_mb = numeric())
   }
+  secret_objects <- unique(secret_objects)
 
   # 3. Static free-variable & function detection via codetools::findGlobals
   fg <- tryCatch(
@@ -157,12 +272,13 @@ inspect_job_globals <- function(
   missing_vars <- setdiff(fg$variables, c(provided_syms, special_ops))
   unexported_fns <- setdiff(fg$functions, c(provided_syms, special_ops))
 
-  # 4. Component serialization size estimates
+  # 4. Component & true serialized bundle size estimates (accounts for nested environments / R6)
   fun_size_mb <- as.numeric(utils::object.size(fun)) / (1024^2)
   closure_total_mb <- sum(closure_tbl$size_mb, na.rm = TRUE)
-  args_size_mb <- if (!is.null(args_list)) as.numeric(utils::object.size(args_list)) / (1024^2) else 0
-  globals_size_mb <- if (length(globals) > 0L) as.numeric(utils::object.size(globals)) / (1024^2) else 0
-  est_bundle_mb <- fun_size_mb + closure_total_mb + args_size_mb + globals_size_mb
+  args_size_mb <- if (!is.null(args_list)) sp_serialized_size_mb(args_list) else 0
+  globals_size_mb <- if (length(globals) > 0L) sp_serialized_size_mb(globals) else 0
+  true_bundle_mb <- sp_serialized_size_mb(list(fun = fun, globals = globals, args_list = args_list))
+  est_bundle_mb <- max(fun_size_mb + closure_total_mb + args_size_mb + globals_size_mb, true_bundle_mb)
 
   # 5. Assemble actionable diagnostics
   warnings_vec <- character(0L)
@@ -183,6 +299,15 @@ inspect_job_globals <- function(
       sprintf(
         "Estimated staged payload size (%.1f MB) exceeds %.1f MB; consider reading large read-only datasets from shared HPC storage instead of serializing in payload.rds.",
         est_bundle_mb, size_warn_mb
+      )
+    )
+  }
+  if (length(secret_objects) > 0L) {
+    warnings_vec <- c(
+      warnings_vec,
+      sprintf(
+        "Potential secret/credential object(s) captured in closure or globals: %s. Avoid serializing credentials into payload.rds.",
+        paste(secret_objects, collapse = ", ")
       )
     )
   }
@@ -217,6 +342,8 @@ inspect_job_globals <- function(
       size_warn_mb = size_warn_mb,
       closure_objects = closure_tbl,
       globals_table = globals_tbl,
+      active_bindings = active_bindings,
+      secret_objects = secret_objects,
       missing_variables = missing_vars,
       unexported_functions = unexported_fns,
       packages = packages
@@ -236,7 +363,7 @@ print.slurmpilot_globals_report <- function(x, ...) {
   ))
   if (length(x$warnings) > 0L) {
     for (w in x$warnings) {
-      cli::cli_bullets(c("!" = w))
+      cli::cli_bullets(c("!" = "{w}"))
     }
   }
   invisible(x)

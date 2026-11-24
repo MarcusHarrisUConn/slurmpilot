@@ -38,6 +38,8 @@ unlink(be$root_dir, recursive = TRUE)
     \item{\code{fault_injection}}{Default fault injection specification (\code{fail_chunks}, \code{oom_chunks}, \code{timeout_chunks}, \code{fail_once}).}
 
     \item{\code{rscript_bin}}{Path to the \code{Rscript} executable used for worker processes.}
+
+    \item{\code{scrub_secrets}}{Logical; scrub ambient host credential environment variables before spawning workers (default \code{TRUE}).}
   }
   \if{html}{\out{</div>}}
 }
@@ -77,7 +79,8 @@ unlink(be$root_dir, recursive = TRUE)
   mem_limit_mb = NULL,
   time_limit_sec = NULL,
   fault_injection = list(),
-  rscript_bin = NULL
+  rscript_bin = NULL,
+  scrub_secrets = TRUE
 )}
     \if{html}{\out{</div>}}
   }
@@ -98,6 +101,9 @@ actively enforce against background worker processes.}
 default \code{TRUE}).}
       \item{\code{rscript_bin}}{Optional explicit path to \code{Rscript}. Defaults to the active
 R installation's \code{Rscript}.}
+      \item{\code{scrub_secrets}}{Logical; strip ambient secret/credential environment
+variables from spawned worker processes (explicit \code{job_spec$env_vars} are
+always forwarded). Default \code{TRUE}.}
     }
     \if{html}{\out{</div>}}
   }

@@ -175,6 +175,7 @@ mod_hpc_submit_server <- function(
     resources_rv <- shiny::reactiveVal(NULL)
     is_piloting_rv <- shiny::reactiveVal(FALSE)
     pilot_msg_rv <- shiny::reactiveVal("Ready to profile workload.")
+    status_error_rv <- shiny::reactiveVal(NULL)
 
     # Non-blocking background pilot state machine
     pilot_state <- new.env(parent = emptyenv())
@@ -233,6 +234,8 @@ mod_hpc_submit_server <- function(
       pilot_state$proc <- callr::r_bg(
         func = sp_pilot_child_runner,
         args = list(payload_path = payload_path),
+        env = sp_callr_scrubbed_env(),
+        user_profile = FALSE,
         supervise = FALSE
       )
       pilot_msg_rv(sprintf("Profiling micro-pilot trial %d / %d (task #%d)...", k, length(pilot_state$indices), task_idx))
@@ -267,18 +270,27 @@ mod_hpc_submit_server <- function(
       pilot_rv(pilot_obj)
 
       if (pilot_obj$summary$n_ok > 0L) {
-        res <- estimate_resources(
-          pilot = pilot_obj,
-          n_tasks = p$n_tasks,
-          max_chunk_size = p$max_chunk_size,
-          mem_safety = p$mem_safety,
-          time_safety = p$time_safety,
-          cpus_per_task = p$cpus_per_task
-        )
-        resources_rv(res)
-        pilot_msg_rv("Micro-pilot complete. Resource plan updated.")
+        tryCatch({
+          res <- estimate_resources(
+            pilot = pilot_obj,
+            n_tasks = p$n_tasks,
+            max_chunk_size = p$max_chunk_size,
+            mem_safety = p$mem_safety,
+            time_safety = p$time_safety,
+            cpus_per_task = p$cpus_per_task
+          )
+          resources_rv(res)
+          status_error_rv(NULL)
+          pilot_msg_rv("Micro-pilot complete. Resource plan updated.")
+        }, error = function(e) {
+          msg <- paste("Resource estimation error:", sp_escape_ui_text(conditionMessage(e), 300L))
+          status_error_rv(msg)
+          pilot_msg_rv(msg)
+        })
       } else {
-        pilot_msg_rv("Micro-pilot failed across all trials. Check worker function.")
+        msg <- "Micro-pilot failed across all trials. Check worker function."
+        status_error_rv(msg)
+        pilot_msg_rv(msg)
       }
     }
 
@@ -364,132 +376,164 @@ mod_hpc_submit_server <- function(
         return()
       }
 
-      n_tasks <- sp_clamp_int(input$n_tasks, default = 10L, lower = 1L, upper = 1000000L)
-      n_pilot <- sp_clamp_int(input$n_pilot, default = 3L, lower = 1L, upper = min(n_tasks, 50L))
-      max_chunk <- sp_clamp_int(input$max_chunk_size, default = 4L, lower = 1L, upper = n_tasks)
-      cpus <- sp_clamp_int(input$cpus_per_task, default = 1L, lower = 1L, upper = 256L)
-      mem_s <- sp_clamp_num(input$mem_safety, default = 1.35, lower = 1.0, upper = 10.0)
-      time_s <- sp_clamp_num(input$time_safety, default = 1.50, lower = 1.0, upper = 10.0)
+      status_error_rv(NULL)
+      tryCatch({
+        n_tasks <- sp_clamp_int(input$n_tasks, default = 10L, lower = 1L, upper = 1000000L)
+        n_pilot <- sp_clamp_int(input$n_pilot, default = 3L, lower = 1L, upper = min(n_tasks, 50L))
+        max_chunk <- sp_clamp_int(input$max_chunk_size, default = 4L, lower = 1L, upper = n_tasks)
+        cpus <- sp_clamp_int(input$cpus_per_task, default = 1L, lower = 1L, upper = 256L)
+        mem_s <- sp_clamp_num(input$mem_safety, default = 1.35, lower = 1.0, upper = 10.0)
+        time_s <- sp_clamp_num(input$time_safety, default = 1.50, lower = 1.0, upper = 10.0)
 
-      builder <- resolve_val(args_builder)
-      cur_args <- builder(n_tasks)
-      cur_fun <- resolve_val(fun)
-      cur_pkgs <- resolve_val(packages)
-      cur_globals <- resolve_val(globals)
-      cur_seed <- resolve_val(seed)
+        builder <- resolve_val(args_builder)
+        cur_args <- builder(n_tasks)
+        if (!is.list(cur_args) || length(cur_args) < 1L) {
+          stop("args_builder() must return a non-empty list of task arguments.", call. = FALSE)
+        }
+        eff_n_tasks <- length(cur_args)
+        n_pilot <- min(n_pilot, eff_n_tasks)
+        max_chunk <- min(max_chunk, eff_n_tasks)
 
-      if (!isTRUE(async_pilot)) {
-        is_piloting_rv(TRUE)
-        p_obj <- pilot_run(
+        cur_fun <- resolve_val(fun)
+        cur_pkgs <- resolve_val(packages)
+        cur_globals <- resolve_val(globals)
+        cur_seed <- resolve_val(seed)
+
+        if (!isTRUE(async_pilot)) {
+          is_piloting_rv(TRUE)
+          on.exit(is_piloting_rv(FALSE), add = TRUE)
+          p_obj <- pilot_run(
+            fun = cur_fun,
+            args_list = cur_args,
+            n_pilot = n_pilot,
+            sample_method = "stratified",
+            cpus_per_task = cpus,
+            seed = cur_seed,
+            packages = cur_pkgs,
+            globals = cur_globals,
+            isolate = TRUE
+          )
+          pilot_rv(p_obj)
+          if (p_obj$summary$n_ok > 0L) {
+            res <- estimate_resources(
+              pilot = p_obj,
+              n_tasks = eff_n_tasks,
+              max_chunk_size = max_chunk,
+              mem_safety = mem_s,
+              time_safety = time_s,
+              cpus_per_task = cpus
+            )
+            resources_rv(res)
+            pilot_msg_rv("Micro-pilot complete. Resource plan updated.")
+          } else {
+            msg <- "Micro-pilot failed across all trials. Check worker function."
+            status_error_rv(msg)
+            pilot_msg_rv(msg)
+          }
+          return()
+        }
+
+        tmp_dir <- tempfile("slurmpilot_shiny_pilot_")
+        dir.create(tmp_dir, recursive = TRUE, showWarnings = FALSE)
+        pilot_state$tmp_dir <- tmp_dir
+        pilot_state$indices <- sp_select_pilot_indices(eff_n_tasks, n_pilot, "stratified", seed = cur_seed)
+        pilot_state$current_k <- 0L
+        pilot_state$rows <- vector("list", length(pilot_state$indices))
+        pilot_state$params <- list(
           fun = cur_fun,
           args_list = cur_args,
-          n_pilot = n_pilot,
-          sample_method = "stratified",
+          n_tasks = eff_n_tasks,
+          max_chunk_size = max_chunk,
           cpus_per_task = cpus,
-          seed = cur_seed,
+          mem_safety = mem_s,
+          time_safety = time_s,
           packages = cur_pkgs,
           globals = cur_globals,
-          isolate = TRUE
+          seed = cur_seed
         )
-        pilot_rv(p_obj)
-        if (p_obj$summary$n_ok > 0L) {
-          res <- estimate_resources(
-            pilot = p_obj,
-            n_tasks = n_tasks,
+        pilot_state$active <- TRUE
+        is_piloting_rv(TRUE)
+        spawn_next_pilot_trial()
+      }, error = function(e) {
+        cleanup_pilot_state()
+        msg <- paste("Pilot failed:", sp_escape_ui_text(conditionMessage(e), 300L))
+        status_error_rv(msg)
+        pilot_msg_rv(msg)
+      })
+    })
+
+    shiny::observeEvent(input$submit_job, {
+      status_error_rv(NULL)
+      tryCatch({
+        n_tasks <- sp_clamp_int(input$n_tasks, default = 10L, lower = 1L, upper = 1000000L)
+        max_chunk <- sp_clamp_int(input$max_chunk_size, default = 4L, lower = 1L, upper = n_tasks)
+        cpus <- sp_clamp_int(input$cpus_per_task, default = 1L, lower = 1L, upper = 256L)
+        mem_s <- sp_clamp_num(input$mem_safety, default = 1.35, lower = 1.0, upper = 10.0)
+        time_s <- sp_clamp_num(input$time_safety, default = 1.50, lower = 1.0, upper = 10.0)
+        jname <- sp_sanitize_name(input$job_name, default = "slurmpilot_study")
+
+        builder <- resolve_val(args_builder)
+        cur_args <- builder(n_tasks)
+        if (!is.list(cur_args) || length(cur_args) < 1L) {
+          stop("args_builder() must return a non-empty list of task arguments.", call. = FALSE)
+        }
+        eff_n_tasks <- length(cur_args)
+        max_chunk <- min(max_chunk, eff_n_tasks)
+
+        cur_fun <- resolve_val(fun)
+        cur_be <- resolve_val(backend)
+        cur_pkgs <- resolve_val(packages)
+        cur_globals <- resolve_val(globals)
+        cur_seed <- resolve_val(seed)
+
+        cur_pilot <- pilot_rv()
+        res <- if (!is.null(cur_pilot) && cur_pilot$summary$n_ok > 0L) {
+          estimate_resources(
+            pilot = cur_pilot,
+            n_tasks = eff_n_tasks,
             max_chunk_size = max_chunk,
             mem_safety = mem_s,
             time_safety = time_s,
             cpus_per_task = cpus
           )
-          resources_rv(res)
-          pilot_msg_rv("Micro-pilot complete. Resource plan updated.")
+        } else {
+          resource_spec(
+            n_tasks = eff_n_tasks,
+            chunk_size = min(eff_n_tasks, max_chunk),
+            mem_mb = 1024L,
+            time_minutes = 15,
+            cpus_per_task = cpus
+          )
         }
-        is_piloting_rv(FALSE)
-        return()
-      }
+        resources_rv(res)
 
-      tmp_dir <- tempfile("slurmpilot_shiny_pilot_")
-      dir.create(tmp_dir, recursive = TRUE, showWarnings = FALSE)
-      pilot_state$tmp_dir <- tmp_dir
-      pilot_state$indices <- sp_select_pilot_indices(length(cur_args), n_pilot, "stratified", seed = cur_seed)
-      pilot_state$current_k <- 0L
-      pilot_state$rows <- vector("list", length(pilot_state$indices))
-      pilot_state$params <- list(
-        fun = cur_fun,
-        args_list = cur_args,
-        n_tasks = n_tasks,
-        max_chunk_size = max_chunk,
-        cpus_per_task = cpus,
-        mem_safety = mem_s,
-        time_safety = time_s,
-        packages = cur_pkgs,
-        globals = cur_globals,
-        seed = cur_seed
-      )
-      pilot_state$active <- TRUE
-      is_piloting_rv(TRUE)
-      spawn_next_pilot_trial()
-    })
+        extra_args <- list()
+        if (isTRUE(input$inject_fault) && inherits(cur_be, "MockSlurmBackend") && res$n_chunks >= 2L) {
+          extra_args$fault_injection <- list(fail_chunks = 2L, fail_once = TRUE)
+        }
 
-    shiny::observeEvent(input$submit_job, {
-      n_tasks <- sp_clamp_int(input$n_tasks, default = 10L, lower = 1L, upper = 1000000L)
-      max_chunk <- sp_clamp_int(input$max_chunk_size, default = 4L, lower = 1L, upper = n_tasks)
-      cpus <- sp_clamp_int(input$cpus_per_task, default = 1L, lower = 1L, upper = 256L)
-      mem_s <- sp_clamp_num(input$mem_safety, default = 1.35, lower = 1.0, upper = 10.0)
-      time_s <- sp_clamp_num(input$time_safety, default = 1.50, lower = 1.0, upper = 10.0)
-      jname <- sp_sanitize_name(input$job_name, default = "slurmpilot_study")
-
-      builder <- resolve_val(args_builder)
-      cur_args <- builder(n_tasks)
-      cur_fun <- resolve_val(fun)
-      cur_be <- resolve_val(backend)
-      cur_pkgs <- resolve_val(packages)
-      cur_globals <- resolve_val(globals)
-      cur_seed <- resolve_val(seed)
-
-      cur_pilot <- pilot_rv()
-      res <- if (!is.null(cur_pilot) && cur_pilot$summary$n_ok > 0L) {
-        estimate_resources(
-          pilot = cur_pilot,
-          n_tasks = n_tasks,
-          max_chunk_size = max_chunk,
-          mem_safety = mem_s,
-          time_safety = time_s,
-          cpus_per_task = cpus
+        submitted <- do.call(
+          slurm_submit,
+          c(
+            list(
+              backend = cur_be,
+              fun = cur_fun,
+              args_list = cur_args,
+              resources = res,
+              name = jname,
+              packages = cur_pkgs,
+              globals = cur_globals,
+              seed = cur_seed
+            ),
+            extra_args
+          )
         )
-      } else {
-        resource_spec(
-          n_tasks = n_tasks,
-          chunk_size = min(n_tasks, max_chunk),
-          mem_mb = 1024L,
-          time_minutes = 15,
-          cpus_per_task = cpus
-        )
-      }
-      resources_rv(res)
-
-      extra_args <- list()
-      if (isTRUE(input$inject_fault) && inherits(cur_be, "MockSlurmBackend") && res$n_chunks >= 2L) {
-        extra_args$fault_injection <- list(fail_chunks = 2L, fail_once = TRUE)
-      }
-
-      submitted <- do.call(
-        slurm_submit,
-        c(
-          list(
-            backend = cur_be,
-            fun = cur_fun,
-            args_list = cur_args,
-            resources = res,
-            name = jname,
-            packages = cur_pkgs,
-            globals = cur_globals,
-            seed = cur_seed
-          ),
-          extra_args
-        )
-      )
-      job_rv(submitted)
+        job_rv(submitted)
+      }, error = function(e) {
+        msg <- paste("Submission failed:", sp_escape_ui_text(conditionMessage(e), 300L))
+        status_error_rv(msg)
+        pilot_msg_rv(msg)
+      })
     })
 
     output$pilot_status_badge <- shiny::renderUI({
@@ -506,9 +550,22 @@ mod_hpc_submit_server <- function(
       res <- resources_rv()
       p <- pilot_rv()
       msg <- pilot_msg_rv()
+      err_msg <- status_error_rv()
+
+      err_box <- if (!is.null(err_msg) && nzchar(err_msg)) {
+        htmltools::div(
+          class = "alert alert-danger mt-2 mb-0 py-2 px-3 small",
+          sp_escape_ui_text(err_msg, 500L)
+        )
+      } else {
+        NULL
+      }
 
       if (is.null(res)) {
-        return(htmltools::div(class = "small text-muted mt-2", msg))
+        return(htmltools::tagList(
+          err_box,
+          if (is.null(err_box)) htmltools::div(class = "small text-muted mt-2", sp_escape_ui_text(msg, 500L))
+        ))
       }
 
       pilot_detail <- if (!is.null(p) && p$summary$n_ok > 0L) {
@@ -521,14 +578,17 @@ mod_hpc_submit_server <- function(
         "Manual resource plan (run micro-pilot for empirical sizing)."
       }
 
-      htmltools::div(
-        class = "alert alert-light border mt-2 mb-0 py-2 px-3 small",
-        htmltools::div(htmltools::strong("Resource Plan: "), sp_escape_ui_text(paste(res$slurm_flags, collapse = " "), 400L)),
+      htmltools::tagList(
+        err_box,
         htmltools::div(
-          class = "text-muted mt-1",
-          sp_escape_ui_text(
-            sprintf("%d tasks -> %d chunks (%d tasks/chunk). %s", res$n_tasks, res$n_chunks, res$chunk_size, pilot_detail),
-            500L
+          class = "alert alert-light border mt-2 mb-0 py-2 px-3 small",
+          htmltools::div(htmltools::strong("Resource Plan: "), sp_escape_ui_text(paste(res$slurm_flags, collapse = " "), 400L)),
+          htmltools::div(
+            class = "text-muted mt-1",
+            sp_escape_ui_text(
+              sprintf("%d tasks -> %d chunks (%d tasks/chunk). %s", res$n_tasks, res$n_chunks, res$chunk_size, pilot_detail),
+              500L
+            )
           )
         )
       )

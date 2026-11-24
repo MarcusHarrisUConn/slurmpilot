@@ -58,6 +58,7 @@ use_rcapsule_container <- function(
 
   sif_path <- NULL
   def_path <- NULL
+  def_content <- NULL
   source_kind <- "path"
   digest_val <- NULL
   r_ver <- NULL
@@ -91,37 +92,94 @@ use_rcapsule_container <- function(
     build_cmd <- container$build_command
   } else if (is.list(container)) {
     # Duck-typed rcapsule / container manifest object (zero hard dependency)
-    source_kind <- if (inherits(container, "rcapsule") || inherits(container, "rcapsule_manifest") ||
-                       inherits(container, "rcapsule_apptainer")) {
-      "rcapsule"
-    } else {
-      "duck_typed_container"
+    is_rcapsule <- inherits(
+      container,
+      c("rcapsule", "rcapsule_manifest", "rcapsule_apptainer",
+        "rcapsule_apptainer_spec", "rcapsule_bundle", "rcapsule_export")
+    )
+    source_kind <- if (is_rcapsule) "rcapsule" else "duck_typed_container"
+
+    first_nonempty <- function(...) {
+      vals <- list(...)
+      for (v in vals) {
+        if (!is.null(v) && length(v) > 0L && !is.na(v[[1L]]) && nzchar(as.character(v[[1L]]))) {
+          return(as.character(v[[1L]]))
+        }
+      }
+      NULL
     }
-    ap_sub <- if (is.list(container$targets) && is.list(container$targets$apptainer)) {
+
+    ap_sub <- if (is.list(container$specs) && is.list(container$specs$apptainer)) {
+      container$specs$apptainer
+    } else if (is.list(container$targets) && is.list(container$targets$apptainer)) {
       container$targets$apptainer
     } else {
       list()
     }
     man_sub <- if (is.list(container$manifest)) container$manifest else list()
+    scan_sub <- if (is.list(container$scan)) container$scan else if (is.list(ap_sub$scan)) ap_sub$scan else list()
 
-    sif_path <- container$apptainer_sif %||% container$sif_path %||% container$image_path %||%
-      ap_sub$sif_path %||% ap_sub$image_path %||% container$image
-    def_path <- container$apptainer_def %||% container$def_path %||% container$recipe_path %||%
-      ap_sub$def_path %||% ap_sub$path
+    sif_path <- first_nonempty(
+      container$apptainer_sif, container$sif_path, container$image_path,
+      ap_sub$sif_path, ap_sub$image_path, container$image
+    )
+    def_path <- first_nonempty(
+      container$apptainer_def, container$def_path, container$recipe_path,
+      container$path, ap_sub$def_path, ap_sub$path
+    )
+    if (is.null(def_path) && identical(container$format, "dir") &&
+        is.character(container$output_path) && length(container$output_path) == 1L &&
+        is.character(container$files)) {
+      def_files <- grep("\\.def$", container$files, ignore.case = TRUE, value = TRUE)
+      if (length(def_files) > 0L) {
+        cand_def <- file.path(container$output_path, def_files[[1L]])
+        sp_assert_path_confined(cand_def, container$output_path, arg = "def_path")
+        def_path <- cand_def
+      }
+    }
+    def_content <- container$def_content %||% container$content %||%
+      ap_sub$def_content %||% ap_sub$content
 
     if (is.null(sif_path) && !is.null(def_path)) {
       sif_path <- sub("\\.def$", ".sif", def_path, ignore.case = TRUE)
     }
+    if (is.null(sif_path) && ((!is.null(def_content) && is.character(def_content) && any(nzchar(def_content))) ||
+                              inherits(container, "rcapsule_manifest"))) {
+      proj_nm <- sp_sanitize_name(
+        first_nonempty(container$project_name, scan_sub$project_name, man_sub$project_name, "rcapsule_env"),
+        default = "rcapsule_env"
+      )
+      sif_path <- paste0("/opt/containers/", proj_nm, ".sif")
+    }
     if (is.null(sif_path)) {
-      cli::cli_abort("Container object must supply at least one of {.field sif_path}, {.field apptainer_sif}, {.field def_path}, or {.field apptainer_def}.")
+      cli::cli_abort(
+        "Container object must supply at least one of {.field sif_path}, {.field apptainer_sif}, {.field def_path}, {.field apptainer_def}, or {.field def_content}."
+      )
     }
 
-    digest_val <- container$content_digest %||% container$capsule_hash %||% container$env_hash %||%
-      man_sub$content_digest %||% man_sub$env_digest %||% ap_sub$digest
-    r_ver <- container$r_version %||% man_sub$r_version %||% ap_sub$r_version
-    base_img <- container$base_image %||% ap_sub$base_image
-    build_cmd <- container$build_command %||% ap_sub$build_command
-    if (!is.null(container$binds)) extra_binds <- as.character(container$binds)
+    digest_val <- first_nonempty(
+      container$def_sha256, container$content_digest, container$capsule_hash,
+      container$env_hash, container$digest, container$sha256,
+      ap_sub$def_sha256, ap_sub$content_digest, ap_sub$digest, ap_sub$sha256,
+      if (is.list(container$integrity)) container$integrity$content_digest else NULL,
+      if (is.list(man_sub$integrity)) man_sub$integrity$content_digest else NULL,
+      man_sub$content_digest, man_sub$env_digest, container$capsule_id
+    )
+    if (is.null(digest_val) && !is.null(def_content) && is.character(def_content) && any(nzchar(def_content))) {
+      digest_val <- digest::digest(paste(def_content, collapse = "\n"), algo = "sha256", serialize = FALSE)
+    }
+
+    r_ver <- first_nonempty(
+      container$r_version,
+      if (is.list(container$environment)) container$environment$r_version else NULL,
+      if (is.list(man_sub$environment)) man_sub$environment$r_version else NULL,
+      man_sub$r_version, scan_sub$r_version, ap_sub$r_version
+    )
+    base_img <- first_nonempty(container$base_image, ap_sub$base_image)
+    build_cmd <- first_nonempty(container$build_command, ap_sub$build_command)
+    if (!is.null(container$bind_paths)) extra_binds <- c(extra_binds, as.character(container$bind_paths))
+    if (!is.null(container$binds)) extra_binds <- c(extra_binds, as.character(container$binds))
+    if (!is.null(ap_sub$bind_paths)) extra_binds <- c(extra_binds, as.character(ap_sub$bind_paths))
     if (!is.null(ap_sub$binds)) extra_binds <- c(extra_binds, as.character(ap_sub$binds))
   } else {
     cli::cli_abort("{.arg container} must be a path string, {.cls slurmpilot_apptainer_def}, or duck-typed container list.")
@@ -162,6 +220,7 @@ use_rcapsule_container <- function(
     list(
       sif_path = sif_path,
       def_path = def_path,
+      def_content = def_content,
       binds = all_binds,
       source = source_kind,
       digest = digest_val,

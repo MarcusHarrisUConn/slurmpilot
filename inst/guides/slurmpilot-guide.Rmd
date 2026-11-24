@@ -2,7 +2,7 @@
 title: "slurmpilot: HPC Field Guide & Quick Reference"
 subtitle: "Auto-Profiling SLURM Orchestration, Apptainer Packaging, and Non-Blocking Shiny Offloading"
 author: "Marcus Harris"
-date: "Version 0.4.0 (2026)"
+date: "Version 0.5.0 (2026)"
 output:
   pdf_document:
     toc: true

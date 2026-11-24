@@ -73,6 +73,15 @@ sp_assert_safe_extra_sbatch <- function(x, arg = "extra_sbatch") {
   checkmate::assert_character(x, any.missing = FALSE)
   if (length(x) == 0L) return(invisible(x))
   sp_assert_no_control_chars(x, arg = arg)
+  forbidden_flags <- paste(
+    c(
+      "--wrap", "--prolog", "--epilog", "--task-prolog", "--task-epilog",
+      "--get-user-env", "--output", "-o", "--error", "-e", "--chdir", "-D",
+      "--export", "--batch", "--input", "-i"
+    ),
+    collapse = "|"
+  )
+  forbidden_pat <- paste0("(^|\\s)(", forbidden_flags, ")(=|\\s|$)")
   for (line in x) {
     trimmed <- trimws(line)
     if (!nzchar(trimmed) || !grepl("^--?[A-Za-z0-9]", trimmed)) {
@@ -80,21 +89,32 @@ sp_assert_safe_extra_sbatch <- function(x, arg = "extra_sbatch") {
         "Each entry in {.arg {arg}} must be a single valid SLURM flag (e.g. '--gres=gpu:1'): {.val {line}}."
       )
     }
-    if (grepl("^--wrap(=|\\s|$)", trimmed, ignore.case = TRUE)) {
-      cli::cli_abort("SLURM {.code --wrap} is forbidden in {.arg {arg}} for command-injection safety.")
+    if (grepl("['\"`$;&|><\\\\(){}*?!#]", trimmed, perl = TRUE)) {
+      cli::cli_abort("Unsafe shell metacharacter or quote in {.arg {arg}}: {.val {line}}.")
     }
-    if (grepl("[`$;|&><\\\\]", trimmed, perl = TRUE)) {
-      cli::cli_abort("Unsafe shell metacharacter in {.arg {arg}}: {.val {line}}.")
+    if (grepl(forbidden_pat, trimmed, ignore.case = TRUE, perl = TRUE)) {
+      cli::cli_abort(
+        "Forbidden SLURM directive (such as {.code --wrap}, {.code --prolog}, {.code --epilog}, or I/O override) in {.arg {arg}}: {.val {line}}."
+      )
+    }
+    # Forbid smuggling multiple flags in one entry (e.g. '--comment=ok --partition=gpu')
+    if (grepl("\\s+-", trimmed, perl = TRUE)) {
+      cli::cli_abort(
+        "Multiple flags in a single {.arg {arg}} entry are forbidden; pass one flag per element: {.val {line}}."
+      )
     }
   }
   invisible(x)
 }
 
-sp_assert_safe_path <- function(x, arg = "path", allow_tilde = FALSE, allow_relative = FALSE) {
+sp_assert_safe_path <- function(x, arg = "path", allow_tilde = FALSE, allow_relative = FALSE, allow_spaces = FALSE) {
   checkmate::assert_string(x, min.chars = 1L)
   sp_assert_no_control_chars(x, arg = arg)
   if (startsWith(x, "-")) {
     cli::cli_abort("Path {.arg {arg}} must not start with '-' (option injection guard): {.val {x}}.")
+  }
+  if (!isTRUE(allow_spaces) && grepl("[[:space:]]", x)) {
+    cli::cli_abort("Whitespace is not permitted in {.arg {arg}}: {.val {x}}.")
   }
   if (grepl("(^|[/\\\\])\\.\\.([/\\\\]|$)", x)) {
     cli::cli_abort("Path traversal ('..') is forbidden in {.arg {arg}}: {.val {x}}.")
@@ -127,9 +147,82 @@ sp_assert_safe_relpath <- function(x, arg = "path") {
   invisible(x)
 }
 
+sp_resolve_real_path <- function(path, max_depth = 20L) {
+  cur <- gsub("\\\\", "/", path)
+  cur <- sub("/+$", "", cur)
+  if (!nzchar(cur)) cur <- "/"
+
+  depth <- 0L
+  while (depth < max_depth) {
+    depth <- depth + 1L
+    # Check if cur itself is a symlink (including dangling symlinks where file.exists() is FALSE)
+    lnk <- tryCatch(Sys.readlink(cur), error = function(e) "")
+    if (!is.na(lnk) && nzchar(lnk)) {
+      target <- if (grepl("^(/|[A-Za-z]:/)", lnk)) {
+        lnk
+      } else {
+        file.path(dirname(cur), lnk)
+      }
+      cur <- gsub("\\\\", "/", target)
+      cur <- sub("/+$", "", cur)
+      if (!nzchar(cur)) cur <- "/"
+      next
+    }
+    if (file.exists(cur) || dir.exists(cur)) {
+      return(sub("/+$", "", normalizePath(cur, winslash = "/", mustWork = TRUE)))
+    }
+    # Walk upward to resolve the nearest existing ancestor (and any symlinks along the way)
+    tail_parts <- character(0L)
+    probe <- cur
+    resolved_base <- NULL
+    while (TRUE) {
+      lnk_p <- tryCatch(Sys.readlink(probe), error = function(e) "")
+      if (!is.na(lnk_p) && nzchar(lnk_p)) {
+        target_p <- if (grepl("^(/|[A-Za-z]:/)", lnk_p)) lnk_p else file.path(dirname(probe), lnk_p)
+        cur <- if (length(tail_parts) > 0L) {
+          paste(c(sub("/+$", "", gsub("\\\\", "/", target_p)), rev(tail_parts)), collapse = "/")
+        } else {
+          sub("/+$", "", gsub("\\\\", "/", target_p))
+        }
+        resolved_base <- NULL
+        break
+      }
+      if (file.exists(probe) || dir.exists(probe)) {
+        resolved_base <- sub("/+$", "", normalizePath(probe, winslash = "/", mustWork = TRUE))
+        break
+      }
+      parent <- dirname(probe)
+      if (identical(parent, probe)) {
+        resolved_base <- probe
+        break
+      }
+      tail_parts <- c(tail_parts, basename(probe))
+      probe <- parent
+    }
+    if (!is.null(resolved_base)) {
+      if (length(tail_parts) == 0L) {
+        return(resolved_base)
+      }
+      return(paste(c(resolved_base, rev(tail_parts)), collapse = "/"))
+    }
+  }
+  cli::cli_abort("Exceeded maximum symlink resolution depth while validating path: {.path {path}}.")
+}
+
 sp_assert_path_confined <- function(path, root_dir, arg = "path") {
-  norm_root <- normalizePath(root_dir, winslash = "/", mustWork = FALSE)
-  norm_path <- normalizePath(path, winslash = "/", mustWork = FALSE)
+  sp_assert_no_control_chars(path, arg = arg)
+  if (grepl("(^|[/\\\\])\\.\\.([/\\\\]|$)", path)) {
+    cli::cli_abort(
+      "Path traversal ('..') violates confinement for {.arg {arg}}: {.path {path}}."
+    )
+  }
+  norm_root <- sp_resolve_real_path(root_dir)
+  norm_path <- sp_resolve_real_path(path)
+  if (grepl("(^|[/\\\\])\\.\\.([/\\\\]|$)", norm_path)) {
+    cli::cli_abort(
+      "Resolved path traversal ('..') violates confinement for {.arg {arg}}: {.path {path}}."
+    )
+  }
   prefix <- paste0(sub("/+$", "", norm_root), "/")
   if (!(identical(norm_path, sub("/+$", "", norm_root)) || startsWith(norm_path, prefix))) {
     cli::cli_abort(
@@ -213,21 +306,86 @@ sp_assert_safe_ssh_options <- function(x, arg = "ssh_options") {
   forbidden_directives <- c(
     "proxycommand", "localcommand", "permitlocalcommand",
     "remotecommand", "proxyusefdpass", "knownhostscommand",
-    "match", "include"
+    "match", "include", "identityfile", "controlpath",
+    "controlmaster", "controlpersist", "proxyjump",
+    "forwardagent", "sendenv", "setenv", "pkcs11provider",
+    "securitykeyprovider", "dynamicforward", "localforward",
+    "remoteforward", "userknownhostsfile"
   )
   pattern <- paste0("(^|[^a-z]|-o)(", paste(forbidden_directives, collapse = "|"), ")(\\b|=|$)")
+  # Block dangerous SSH CLI flags (-F config file, -S control socket, -J jump, port/agent forwarding, -i/-E/-O/-M/-G)
+  forbidden_flag_pat <- "^-[46CTqvNfn]*(F|S|L|R|D|W|A|E|O|M|G|i|J)($|[^A-Za-z]|.)"
 
   for (opt in x) {
-    if (grepl(pattern, tolower(opt), perl = TRUE)) {
+    trimmed <- trimws(opt)
+    if (grepl(forbidden_flag_pat, trimmed, perl = TRUE)) {
+      cli::cli_abort(
+        "Dangerous SSH CLI flag forbidden in {.arg {arg}}: {.val {opt}}."
+      )
+    }
+    if (grepl(pattern, tolower(trimmed), perl = TRUE)) {
       cli::cli_abort(
         "Dangerous SSH directive forbidden in {.arg {arg}}: {.val {opt}}."
       )
     }
-    if (grepl("[`$;|&><]", opt, perl = TRUE)) {
+    if (grepl("[`$;|&><]", trimmed, perl = TRUE)) {
       cli::cli_abort("Unsafe shell metacharacter in {.arg {arg}}: {.val {opt}}.")
     }
   }
   invisible(x)
+}
+
+sp_sh_quote_path <- function(x) {
+  vapply(as.character(x), function(s) {
+    if (identical(s, "~")) {
+      return("\"$HOME\"")
+    }
+    if (startsWith(s, "~/")) {
+      rest <- sub("^~/", "", s)
+      return(paste0("\"$HOME\"/", sp_sh_quote(rest)))
+    }
+    sp_sh_quote(s)
+  }, character(1L), USE.NAMES = FALSE)
+}
+
+sp_is_secret_env_name <- function(x) {
+  if (length(x) == 0L) return(logical(0L))
+  pat <- paste0(
+    "(^|_)(API_?KEY|SECRET(_?KEY)?|TOKEN|PASSWORD|PASSWD|PASS|CREDENTIAL|",
+    "PRIVATE_?KEY|ACCESS_?KEY|SESSION_?TOKEN|AUTH|COOKIE|DSN)(_|$)|",
+    "^(AWS_|GITHUB_|GH_|OPENAI_|ANTHROPIC_|GEMINI_|GOOGLE_API|HF_TOKEN|",
+    "HUGGING_?FACE|AZURE_|GCP_|SLURM_JWT|DATABASE_URL|POSTGRES_URL|MYSQL_|",
+    "REDIS_URL|MONGO_URI|PGPASS)"
+  )
+  grepl(pat, as.character(x), ignore.case = TRUE, perl = TRUE)
+}
+
+sp_scrub_ambient_env <- function(env = Sys.getenv(), keep = character()) {
+  if (length(env) == 0L) return(env)
+  nms <- names(env)
+  if (is.null(nms)) return(env)
+  drop <- sp_is_secret_env_name(nms) & !(nms %in% as.character(keep))
+  out <- as.character(env[!drop])
+  names(out) <- nms[!drop]
+  out
+}
+
+sp_callr_scrubbed_env <- function(keep = character()) {
+  cur <- Sys.getenv()
+  nms <- names(cur)
+  drop <- if (!is.null(nms)) {
+    nms[sp_is_secret_env_name(nms) & !(nms %in% as.character(keep))]
+  } else {
+    character(0L)
+  }
+  unset_map <- if (length(drop) > 0L) {
+    stats::setNames(rep(NA_character_, length(drop)), drop)
+  } else {
+    character(0L)
+  }
+  base_safe <- callr::rcmd_safe_env()
+  base_safe <- base_safe[!(names(base_safe) %in% names(unset_map))]
+  c(base_safe, unset_map, R_ENVIRON_USER = "", R_PROFILE_USER = "")
 }
 
 sp_assert_safe_r_package <- function(x, arg = "packages") {
@@ -274,8 +432,8 @@ sp_assert_safe_version <- function(x, arg = "version") {
 sp_assert_safe_url <- function(x, arg = "url") {
   checkmate::assert_string(x, min.chars = 8L)
   sp_assert_no_control_chars(x, arg = arg)
-  if (!grepl("^https?://[A-Za-z0-9._~:/?#\\[\\]@!$*+,;=%-]+$", x, perl = TRUE) ||
-      grepl("['\"`\\\\\\s]", x, perl = TRUE)) {
+  if (!grepl("^https?://[A-Za-z0-9._~:/?#\\[\\]@!*+,;=%-]+$", x, perl = TRUE) ||
+      grepl("['\"`$\\\\\\s]", x, perl = TRUE)) {
     cli::cli_abort("Invalid or unsafe HTTP(S) URL in {.arg {arg}}: {.val {x}}.")
   }
   invisible(x)

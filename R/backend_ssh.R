@@ -28,7 +28,7 @@ build_ssh_args <- function(
   if (!is.null(user)) sp_assert_safe_ssh_user(user, arg = "user")
   checkmate::assert_int(port, lower = 1L, upper = 65535L)
   if (!is.null(ssh_key)) {
-    sp_assert_safe_path(ssh_key, arg = "ssh_key", allow_tilde = TRUE, allow_relative = TRUE)
+    sp_assert_safe_path(ssh_key, arg = "ssh_key", allow_tilde = TRUE, allow_relative = TRUE, allow_spaces = TRUE)
   }
   sp_assert_safe_ssh_options(ssh_options, arg = "ssh_options")
   checkmate::assert_string(remote_cmd, min.chars = 1L)
@@ -83,6 +83,9 @@ build_scp_args <- function(
     if (grepl("(^|[/\\\\])\\.\\.([/\\\\]|$)", s)) {
       cli::cli_abort("Path traversal ('..') is forbidden in SCP {.arg src}: {.val {s}}.")
     }
+    if (grepl("[[:space:]]", s) || sp_has_shell_metachars(s)) {
+      cli::cli_abort("Unsafe shell metacharacter or whitespace in SCP {.arg src}: {.val {s}}.")
+    }
   }
   checkmate::assert_string(dest, min.chars = 1L)
   sp_assert_no_control_chars(dest, arg = "dest")
@@ -92,9 +95,12 @@ build_scp_args <- function(
   if (grepl("(^|[/\\\\])\\.\\.([/\\\\]|$)", dest)) {
     cli::cli_abort("Path traversal ('..') is forbidden in SCP {.arg dest}: {.val {dest}}.")
   }
+  if (grepl("[[:space:]]", dest) || sp_has_shell_metachars(dest)) {
+    cli::cli_abort("Unsafe shell metacharacter or whitespace in SCP {.arg dest}: {.val {dest}}.")
+  }
   checkmate::assert_int(port, lower = 1L, upper = 65535L)
   if (!is.null(ssh_key)) {
-    sp_assert_safe_path(ssh_key, arg = "ssh_key", allow_tilde = TRUE, allow_relative = TRUE)
+    sp_assert_safe_path(ssh_key, arg = "ssh_key", allow_tilde = TRUE, allow_relative = TRUE, allow_spaces = TRUE)
   }
   sp_assert_safe_ssh_options(ssh_options, arg = "ssh_options")
   checkmate::assert_flag(recursive)
@@ -180,7 +186,15 @@ parse_squeue_output <- function(stdout) {
     return(empty)
   }
 
-  rows <- list()
+  job_ids_list <- list()
+  chunk_ids_list <- list()
+  states_list <- list()
+  elapsed_list <- list()
+  nodes_list <- list()
+  reasons_list <- list()
+  n_rows <- 0L
+  max_total_rows <- 100000L
+
   for (ln in lines) {
     fields <- strsplit(ln, "|", fixed = TRUE)[[1L]]
     if (length(fields) < 2L) next
@@ -193,27 +207,40 @@ parse_squeue_output <- function(stdout) {
     if (grepl("_", raw_id, fixed = TRUE)) {
       parts <- strsplit(raw_id, "_", fixed = TRUE)[[1L]]
       base_id <- parts[[1L]]
-      cids <- sp_expand_slurm_array_expr(parts[[2L]])
+      if (!grepl("^[0-9]+$", base_id)) next
+      cids <- sp_expand_slurm_array_expr(parts[[2L]], max_indices = max_total_rows)
     } else {
       base_id <- raw_id
+      if (!grepl("^[0-9]+$", base_id)) next
       cids <- 1L
     }
-    if (!grepl("^[0-9]+$", base_id)) next
 
-    for (cid in cids) {
-      rows[[length(rows) + 1L]] <- tibble::tibble(
-        slurm_job_id = base_id,
-        chunk_id = as.integer(cid),
-        state = state,
-        elapsed_sec = elapsed_sec,
-        node = node,
-        reason = reason
+    k <- length(cids)
+    if (k == 0L) next
+    n_rows <- n_rows + k
+    if (n_rows > max_total_rows) {
+      cli::cli_abort(
+        "Expanded {.code squeue} array rows ({n_rows}) exceed safety limit ({max_total_rows})."
       )
     }
+    idx <- length(job_ids_list) + 1L
+    job_ids_list[[idx]] <- rep(base_id, k)
+    chunk_ids_list[[idx]] <- as.integer(cids)
+    states_list[[idx]] <- rep(state, k)
+    elapsed_list[[idx]] <- rep(elapsed_sec, k)
+    nodes_list[[idx]] <- rep(node, k)
+    reasons_list[[idx]] <- rep(reason, k)
   }
 
-  if (length(rows) == 0L) return(empty)
-  do.call(rbind, rows)
+  if (length(job_ids_list) == 0L) return(empty)
+  tibble::tibble(
+    slurm_job_id = unlist(job_ids_list, use.names = FALSE),
+    chunk_id = unlist(chunk_ids_list, use.names = FALSE),
+    state = unlist(states_list, use.names = FALSE),
+    elapsed_sec = unlist(elapsed_list, use.names = FALSE),
+    node = unlist(nodes_list, use.names = FALSE),
+    reason = unlist(reasons_list, use.names = FALSE)
+  )
 }
 
 #' Parse Pipe-Delimited SLURM `sacct` Accounting Output
@@ -285,7 +312,13 @@ parse_sacct_output <- function(stdout) {
     exit_code <- NA_integer_
     if (length(fields) >= 5L && nzchar(trimws(fields[[5L]]))) {
       ec_parts <- strsplit(trimws(fields[[5L]]), ":", fixed = TRUE)[[1L]]
-      exit_code <- suppressWarnings(as.integer(ec_parts[[1L]]))
+      ec_main <- suppressWarnings(as.integer(ec_parts[[1L]]))
+      ec_sig <- if (length(ec_parts) >= 2L) suppressWarnings(as.integer(ec_parts[[2L]])) else NA_integer_
+      exit_code <- if (!is.na(ec_sig) && ec_sig > 0L && (is.na(ec_main) || ec_main == 0L)) {
+        as.integer(128L + ec_sig)
+      } else {
+        ec_main
+      }
     }
 
     key <- paste0(base_id, "_", cid)
@@ -463,7 +496,7 @@ SlurmSshBackend <- R6::R6Class(
       sp_assert_safe_path(remote_dir, arg = "remote_dir", allow_tilde = TRUE, allow_relative = FALSE)
       checkmate::assert_int(port, lower = 1L, upper = 65535L)
       if (!is.null(ssh_key)) {
-        sp_assert_safe_path(ssh_key, arg = "ssh_key", allow_tilde = TRUE, allow_relative = TRUE)
+        sp_assert_safe_path(ssh_key, arg = "ssh_key", allow_tilde = TRUE, allow_relative = TRUE, allow_spaces = TRUE)
       }
       sp_assert_safe_ssh_options(ssh_options, arg = "ssh_options")
       if (!is.null(partition)) sp_assert_safe_slurm_token(partition, arg = "partition")
@@ -514,9 +547,10 @@ SlurmSshBackend <- R6::R6Class(
     #' @return A `slurmpilot_job` handle.
     submit = function(job_spec, dependency = NULL, ...) {
       checkmate::assert_class(job_spec, "slurmpilot_job_spec")
-      if (!is.null(dependency)) {
-        sp_assert_safe_slurm_dependency(dependency, arg = "dependency", allow_dry_run = isTRUE(self$dry_run))
-        job_spec$dependency <- dependency
+      effective_dep <- if (!is.null(dependency)) dependency else job_spec$dependency
+      if (!is.null(effective_dep)) {
+        sp_assert_safe_slurm_dependency(effective_dep, arg = "dependency", allow_dry_run = isTRUE(self$dry_run))
+        job_spec$dependency <- effective_dep
       }
 
       # Apply backend defaults for partition/account/qos if unset on resources
@@ -542,9 +576,9 @@ SlurmSshBackend <- R6::R6Class(
 
       mkdir_cmd <- sprintf(
         "mkdir -p %s %s %s",
-        sp_sh_quote(paste0(remote_job_dir, "/logs")),
-        sp_sh_quote(paste0(remote_job_dir, "/results")),
-        sp_sh_quote(paste0(remote_job_dir, "/status"))
+        sp_sh_quote_path(paste0(remote_job_dir, "/logs")),
+        sp_sh_quote_path(paste0(remote_job_dir, "/results")),
+        sp_sh_quote_path(paste0(remote_job_dir, "/status"))
       )
       stage_files <- c(
         staged$payload_path,
@@ -553,7 +587,7 @@ SlurmSshBackend <- R6::R6Class(
         staged$worker_path,
         staged$sbatch_path
       )
-      sbatch_cmd <- sprintf("sbatch --parsable %s", sp_sh_quote(paste0(remote_job_dir, "/submit.sbatch")))
+      sbatch_cmd <- sprintf("sbatch --parsable %s", sp_sh_quote_path(paste0(remote_job_dir, "/submit.sbatch")))
 
       if (isTRUE(self$dry_run)) {
         dry_cmds <- list(
@@ -737,6 +771,7 @@ SlurmSshBackend <- R6::R6Class(
       remote_retry_path <- paste0(rec$remote_dir, "/", retry_filename)
 
       effective_sif <- rec$job_spec$container_sif %||% self$container_sif
+      effective_binds <- unique(c(self$container_binds, rec$job_spec$container_binds %||% character()))
       effective_modules <- unique(c(self$modules, rec$job_spec$modules))
       render_sbatch_script(
         job_name = paste0(rec$job_name, "_r", next_attempt),
@@ -746,13 +781,13 @@ SlurmSshBackend <- R6::R6Class(
         array_indices = chunks,
         attempt = next_attempt,
         container_sif = effective_sif,
-        container_binds = self$container_binds,
+        container_binds = effective_binds,
         modules = effective_modules,
         env_vars = rec$job_spec$env_vars,
         output_path = local_retry_path
       )
 
-      sbatch_cmd <- sprintf("sbatch --parsable %s", sp_sh_quote(remote_retry_path))
+      sbatch_cmd <- sprintf("sbatch --parsable %s", sp_sh_quote_path(remote_retry_path))
 
       if (isTRUE(self$dry_run)) {
         new_slurm_id <- paste0("DRY_RUN_R", next_attempt)
@@ -822,8 +857,8 @@ SlurmSshBackend <- R6::R6Class(
         }
         out_p <- paste0(rec$remote_dir, "/logs/chunk_", cid, ".out")
         err_p <- paste0(rec$remote_dir, "/logs/chunk_", cid, ".err")
-        o_res <- private$exec_ssh(sprintf("cat %s 2>/dev/null || true", sp_sh_quote(out_p)), allow_error = TRUE)
-        e_res <- private$exec_ssh(sprintf("cat %s 2>/dev/null || true", sp_sh_quote(err_p)), allow_error = TRUE)
+        o_res <- private$exec_ssh(sprintf("cat %s 2>/dev/null || true", sp_sh_quote_path(out_p)), allow_error = TRUE)
+        e_res <- private$exec_ssh(sprintf("cat %s 2>/dev/null || true", sp_sh_quote_path(err_p)), allow_error = TRUE)
         list(chunk_id = cid, stdout = o_res$stdout %||% "", stderr = e_res$stdout %||% "")
       })
       names(out) <- paste0("chunk_", cids)

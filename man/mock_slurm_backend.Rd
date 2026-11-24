@@ -11,7 +11,8 @@ mock_slurm_backend(
   mem_limit_mb = NULL,
   time_limit_sec = NULL,
   fault_injection = list(),
-  rscript_bin = NULL
+  rscript_bin = NULL,
+  scrub_secrets = TRUE
 )
 }
 \arguments{
@@ -35,6 +36,9 @@ default \code{TRUE}).}
 
 \item{rscript_bin}{Optional explicit path to \code{Rscript}. Defaults to the active
 R installation's \code{Rscript}.}
+
+\item{scrub_secrets}{Logical; scrub ambient host credential environment
+variables before spawning workers. Default \code{TRUE}.}
 }
 \value{
 A \link{MockSlurmBackend} R6 object.

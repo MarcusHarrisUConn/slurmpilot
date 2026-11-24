@@ -181,12 +181,17 @@ build_apptainer_def <- function(
     lines,
     "%post",
     "    set -eu",
-    "    export DEBIAN_FRONTEND=noninteractive",
-    "    apt-get update && apt-get install -y --no-install-recommends \\"
+    "    export DEBIAN_FRONTEND=noninteractive"
   )
-  for (i in seq_along(apt_all)) {
-    suffix <- if (i < length(apt_all)) " \\" else ""
-    lines <- c(lines, paste0("        ", apt_all[[i]], suffix))
+  if (length(apt_all) > 0L) {
+    lines <- c(
+      lines,
+      "    apt-get update && apt-get install -y --no-install-recommends \\"
+    )
+    for (i in seq_along(apt_all)) {
+      suffix <- if (i < length(apt_all)) " \\" else ""
+      lines <- c(lines, paste0("        ", apt_all[[i]], suffix))
+    }
   }
   lines <- c(lines, "")
 

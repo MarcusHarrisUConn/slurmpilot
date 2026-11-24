@@ -11,10 +11,14 @@ Tested locally on macOS (`aarch64-apple-darwin23`, R 4.6.1):
 
 ## Submission Notes
 
-- Release `0.4.0` of `slurmpilot` adds multi-stage dependent job DAGs
-  (`slurm_pipeline()`), post-mortem efficiency auditing
-  (`slurm_efficiency_report()`), zero-dependency container handoff
-  (`use_rcapsule_container()`), and a 5th executable `knitr` vignette.
+- Release `0.5.0` of `slurmpilot` delivers a comprehensive independent peer
+  red-team security and reliability hardening pass (remediating all 18 findings
+  across `cli` glue safety, `#SBATCH`/SSH/SCP/URL/symlink injection defenses,
+  ambient credential scrubbing, Apptainer `--cleanenv` env forwarding, POSIX
+  `~/` expansion, `rcapsule` interoperability, pipeline DAG semantics,
+  efficiency reporting, bounded SLURM parsers, resilient Shiny error handling,
+  and $O(N \log M)$ LPT chunking) locked by permanent regression tests in
+  `tests/testthat/test-peer-redteam.R`.
 - Line coverage verified via `covr::package_coverage()` exceeds 93%.
 - All examples, tests, and vignettes strictly respect `<= 2` worker processes,
   write exclusively to `tempdir()` with full cleanup, and leave global state

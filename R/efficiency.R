@@ -96,15 +96,21 @@ slurm_efficiency_report <- function(
     cli::cli_abort("Cannot compute efficiency report: telemetry table has 0 chunks.")
   }
 
+  if (!("chunk_id" %in% names(chunks_df))) chunks_df$chunk_id <- seq_len(nrow(chunks_df))
   if (!("wall_sec" %in% names(chunks_df))) chunks_df$wall_sec <- NA_real_
   if (!("peak_rss_mb" %in% names(chunks_df))) chunks_df$peak_rss_mb <- NA_real_
   if (!("state" %in% names(chunks_df))) chunks_df$state <- "COMPLETED"
 
+  clean_wall <- as.numeric(chunks_df$wall_sec)
+  clean_wall[!is.finite(clean_wall)] <- NA_real_
+  clean_rss <- as.numeric(chunks_df$peak_rss_mb)
+  clean_rss[!is.finite(clean_rss)] <- NA_real_
+
   req_mem <- as.numeric(resources$mem_mb)
   req_time <- as.numeric(resources$time_sec)
 
-  rss_ok <- chunks_df$peak_rss_mb[!is.na(chunks_df$peak_rss_mb) & is.finite(chunks_df$peak_rss_mb)]
-  wall_ok <- chunks_df$wall_sec[!is.na(chunks_df$wall_sec) & is.finite(chunks_df$wall_sec)]
+  rss_ok <- clean_rss[!is.na(clean_rss)]
+  wall_ok <- clean_wall[!is.na(clean_wall)]
 
   peak_rss_max <- if (length(rss_ok) > 0L) max(rss_ok) else NA_real_
   peak_rss_med <- if (length(rss_ok) > 0L) stats::median(rss_ok) else NA_real_
@@ -119,13 +125,18 @@ slurm_efficiency_report <- function(
 
   straggler_ratio <- if (!is.na(wall_max) && !is.na(wall_med) && wall_med > 0) {
     wall_max / wall_med
+  } else if (!is.na(wall_max) && !is.na(wall_med) && wall_med == 0 && wall_max > 0 && length(wall_ok) >= 2L) {
+    Inf
   } else {
     1
   }
 
+  n_completed <- sum(chunks_df$state == "COMPLETED", na.rm = TRUE)
   n_oom <- sum(chunks_df$state == "OUT_OF_MEMORY", na.rm = TRUE)
   n_timeout <- sum(chunks_df$state == "TIMEOUT", na.rm = TRUE)
   n_failed <- sum(chunks_df$state == "FAILED", na.rm = TRUE)
+  n_cancelled <- sum(chunks_df$state == "CANCELLED", na.rm = TRUE)
+  all_failed <- (n_completed == 0L) && ((n_failed + n_oom + n_timeout + n_cancelled) > 0L)
 
   # Compute tightened / escalated recommended resources for next run
   rec_mem_raw <- if (n_oom > 0L) {
@@ -171,6 +182,8 @@ slurm_efficiency_report <- function(
 
   classification <- if (is_under) {
     "under_provisioned"
+  } else if (isTRUE(all_failed)) {
+    "failed"
   } else if (is_imbalanced) {
     "imbalanced"
   } else if (is_over) {
@@ -189,8 +202,12 @@ slurm_efficiency_report <- function(
   } else if (!is.na(time_slack_pct) && time_slack_pct > 60 && recommended$time_sec < resources$time_sec) {
     recs <- c(recs, sprintf("Walltime slack is %.1f%% (max %.1fs vs %s requested); tighten --time to %s.", time_slack_pct, wall_max, resources$time_slurm, recommended$time_slurm))
   }
+  if (isTRUE(all_failed) && n_oom == 0L && n_timeout == 0L) {
+    recs <- c(recs, sprintf("All %d chunk(s) failed (%d FAILED, %d CANCELLED) without completing; inspect chunk logs with slurm_logs() before resizing resources.", nrow(chunks_df), n_failed, n_cancelled))
+  }
   if (is_imbalanced) {
-    recs <- c(recs, sprintf("High straggler ratio (%.2fx max/median chunk time); switch to strategy = 'lpt' in estimate_resources()/plan_chunks() to balance chunk loads.", straggler_ratio))
+    ratio_lbl <- if (is.infinite(straggler_ratio)) "Inf" else sprintf("%.2fx", straggler_ratio)
+    recs <- c(recs, sprintf("High straggler ratio (%s max/median chunk time); switch to strategy = 'lpt' in estimate_resources()/plan_chunks() to balance chunk loads.", ratio_lbl))
   }
   if (length(recs) == 0L) {
     recs <- "Resource allocations are well-calibrated to empirical usage."
@@ -199,10 +216,10 @@ slurm_efficiency_report <- function(
   chunks_out <- tibble::tibble(
     chunk_id = as.integer(chunks_df$chunk_id),
     state = as.character(chunks_df$state),
-    wall_sec = as.numeric(chunks_df$wall_sec),
-    peak_rss_mb = as.numeric(chunks_df$peak_rss_mb),
-    mem_util_pct = ifelse(is.na(chunks_df$peak_rss_mb), NA_real_, 100 * chunks_df$peak_rss_mb / req_mem),
-    time_util_pct = ifelse(is.na(chunks_df$wall_sec), NA_real_, 100 * chunks_df$wall_sec / req_time)
+    wall_sec = clean_wall,
+    peak_rss_mb = clean_rss,
+    mem_util_pct = ifelse(is.na(clean_rss), NA_real_, 100 * clean_rss / req_mem),
+    time_util_pct = ifelse(is.na(clean_wall), NA_real_, 100 * clean_wall / req_time)
   )
 
   structure(
@@ -257,7 +274,7 @@ print.slurmpilot_efficiency <- function(x, ...) {
     "*" = "Recommended next flags: {paste(x$recommended_resources$slurm_flags, collapse = ' ')}"
   ))
   for (r in x$recommendations) {
-    cli::cli_bullets(c("i" = r))
+    cli::cli_bullets(c("i" = "{r}"))
   }
   invisible(x)
 }

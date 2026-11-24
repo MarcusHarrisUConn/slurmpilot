@@ -127,7 +127,28 @@ sp_simplify_results <- function(values) {
     return(values)
   }
   if (all(vapply(non_null, is.data.frame, logical(1L))) && length(non_null) == length(values)) {
-    return(tibble::as_tibble(do.call(rbind, values)))
+    col_sets <- lapply(values, names)
+    same_cols <- all(vapply(col_sets, function(cn) identical(cn, col_sets[[1L]]), logical(1L)))
+    if (same_cols) {
+      bound <- tryCatch(do.call(rbind, values), error = function(e) NULL)
+      if (!is.null(bound)) {
+        return(tibble::as_tibble(bound))
+      }
+    } else {
+      all_cols <- unique(unlist(col_sets, use.names = FALSE))
+      aligned <- lapply(values, function(df) {
+        missing_cols <- setdiff(all_cols, names(df))
+        for (mc in missing_cols) {
+          df[[mc]] <- rep(NA, nrow(df))
+        }
+        df[, all_cols, drop = FALSE]
+      })
+      bound <- tryCatch(do.call(rbind, aligned), error = function(e) NULL)
+      if (!is.null(bound)) {
+        return(tibble::as_tibble(bound))
+      }
+    }
+    return(values)
   }
   is_scalar_atomic <- vapply(
     values,

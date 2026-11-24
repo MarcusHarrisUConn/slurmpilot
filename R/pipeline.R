@@ -294,13 +294,18 @@ print.slurmpilot_pipeline <- function(x, ...) {
   invisible(x)
 }
 
-sp_dependency_satisfied <- function(dep_type, upstream_states) {
+sp_dependency_satisfied <- function(dep_type, upstream_states, stop_on_failure = TRUE) {
   if (length(upstream_states) == 0L) return(TRUE)
+  terminal_failed <- c("FAILED", "PARTIAL_FAILURE", "CANCELLED", "OUT_OF_MEMORY", "TIMEOUT")
   switch(
     dep_type,
-    afterok = all(upstream_states == "COMPLETED"),
-    afternotok = any(upstream_states %in% c("FAILED", "PARTIAL_FAILURE", "CANCELLED")),
-    afterany = all(upstream_states %in% c("COMPLETED", "FAILED", "PARTIAL_FAILURE", "CANCELLED")),
+    afterok = if (isTRUE(stop_on_failure)) {
+      all(upstream_states == "COMPLETED")
+    } else {
+      all(upstream_states %in% c("COMPLETED", "PARTIAL_FAILURE", "FAILED"))
+    },
+    afternotok = any(upstream_states %in% c(terminal_failed, "SKIPPED")),
+    afterany = all(upstream_states %in% c("COMPLETED", terminal_failed, "SKIPPED")),
     FALSE
   )
 }
@@ -368,6 +373,13 @@ slurm_pipeline_run <- function(
   checkmate::assert_flag(stop_on_failure)
   checkmate::assert_flag(progress)
 
+  if (!isTRUE(wait) && nrow(pipeline$edges) > 0L && inherits(backend, "MockSlurmBackend")) {
+    cli::cli_abort(c(
+      "{.code wait = FALSE} with stage dependencies is not supported on {.cls MockSlurmBackend} because local mock execution does not run a cluster-side SLURM dependency queue.",
+      "i" = "Run with {.code wait = TRUE} on {.cls MockSlurmBackend}, or submit asynchronously with {.cls SlurmSshBackend}."
+    ))
+  }
+
   started_at <- sp_timestamp()
   jobs <- list()
   stage_states <- stats::setNames(rep("PENDING", length(pipeline$order)), pipeline$order)
@@ -380,7 +392,7 @@ slurm_pipeline_run <- function(
 
     if (isTRUE(wait) && length(deps) > 0L) {
       up_states <- unname(stage_states[deps])
-      if (!sp_dependency_satisfied(stage$dependency_type, up_states)) {
+      if (!sp_dependency_satisfied(stage$dependency_type, up_states, stop_on_failure = stop_on_failure)) {
         stage_states[[st_name]] <- "SKIPPED"
         if (isTRUE(progress)) {
           cli::cli_inform("Stage {.val {st_name}}: skipped (upstream {stage$dependency_type} condition unmet).")
@@ -438,8 +450,16 @@ slurm_pipeline_run <- function(
       stage_args <- stage$args_list
     }
 
-    # Reconcile resource spec with resolved n_tasks
+    # Reconcile resource spec with resolved n_tasks (handle 0-task dynamic stages cleanly)
     n_t <- length(stage_args)
+    if (n_t == 0L) {
+      stage_states[[st_name]] <- "SKIPPED"
+      stage_results[[st_name]] <- list()
+      if (isTRUE(progress)) {
+        cli::cli_inform("Stage {.val {st_name}}: skipped (0 tasks returned by upstream generator).")
+      }
+      next
+    }
     stage_res <- stage$resources
     if (is.null(stage_res)) {
       stage_res <- resource_spec(n_tasks = n_t, chunk_size = max(1L, min(n_t, 4L)))

@@ -1,7 +1,14 @@
 # Local parallel Mock SLURM Scheduler backend using processx + ps
 
-sp_merge_env <- function(overrides) {
-  base_env <- Sys.getenv()
+sp_merge_env <- function(overrides, scrub_secrets = TRUE) {
+  raw_env <- Sys.getenv()
+  base_env <- as.character(raw_env)
+  names(base_env) <- names(raw_env)
+  if (isTRUE(scrub_secrets)) {
+    base_env <- sp_scrub_ambient_env(base_env, keep = names(overrides))
+    if (!("R_ENVIRON_USER" %in% names(overrides))) base_env[["R_ENVIRON_USER"]] <- ""
+    if (!("R_PROFILE_USER" %in% names(overrides))) base_env[["R_PROFILE_USER"]] <- ""
+  }
   if (length(overrides) == 0L) {
     return(base_env)
   }
@@ -46,6 +53,8 @@ MockSlurmBackend <- R6::R6Class(
     fault_injection = list(),
     #' @field rscript_bin Path to the `Rscript` executable used for worker processes.
     rscript_bin = NULL,
+    #' @field scrub_secrets Logical; scrub ambient host credential environment variables before spawning workers (default `TRUE`).
+    scrub_secrets = TRUE,
 
     #' @description Create a new `MockSlurmBackend`.
     #' @param root_dir Optional directory path for job staging and checkpoints.
@@ -62,6 +71,9 @@ MockSlurmBackend <- R6::R6Class(
     #'   default `TRUE`).
     #' @param rscript_bin Optional explicit path to `Rscript`. Defaults to the active
     #'   R installation's `Rscript`.
+    #' @param scrub_secrets Logical; strip ambient secret/credential environment
+    #'   variables from spawned worker processes (explicit `job_spec$env_vars` are
+    #'   always forwarded). Default `TRUE`.
     initialize = function(
       root_dir = NULL,
       max_workers = 2L,
@@ -69,13 +81,15 @@ MockSlurmBackend <- R6::R6Class(
       mem_limit_mb = NULL,
       time_limit_sec = NULL,
       fault_injection = list(),
-      rscript_bin = NULL
+      rscript_bin = NULL,
+      scrub_secrets = TRUE
     ) {
       checkmate::assert_int(max_workers, lower = 1L)
       checkmate::assert_number(queue_delay, lower = 0, finite = TRUE)
       if (!is.null(mem_limit_mb)) checkmate::assert_number(mem_limit_mb, lower = 1, finite = TRUE)
       if (!is.null(time_limit_sec)) checkmate::assert_number(time_limit_sec, lower = 0.05, finite = TRUE)
       checkmate::assert_list(fault_injection)
+      checkmate::assert_flag(scrub_secrets)
 
       if (is.null(root_dir)) {
         root_dir <- tempfile("slurmpilot_mock_")
@@ -88,6 +102,7 @@ MockSlurmBackend <- R6::R6Class(
       self$time_limit_sec <- time_limit_sec
       self$fault_injection <- fault_injection
       self$rscript_bin <- rscript_bin %||% file.path(R.home("bin"), "Rscript")
+      self$scrub_secrets <- isTRUE(scrub_secrets)
       invisible(self)
     },
 
@@ -597,13 +612,22 @@ MockSlurmBackend <- R6::R6Class(
             err_log <- file.path(rec$job_dir, "logs", sprintf("chunk_%d.err", cid))
             fault <- private$resolve_chunk_fault(rec$fault_injection, cid, ch$attempt)
 
-            env_overrides <- list(
-              SLURMPILOT_WORK_DIR = rec$job_dir,
-              SLURMPILOT_CHUNK_ID = as.character(cid),
-              SLURM_ARRAY_TASK_ID = as.character(cid),
-              SLURM_CPUS_PER_TASK = as.character(rec$resources$cpus_per_task),
-              SLURMPILOT_ATTEMPT = as.character(ch$attempt),
-              SLURMPILOT_MOCK_FAULT = fault
+            user_env <- if (!is.null(rec$job_spec) && length(rec$job_spec$env_vars) > 0L) {
+              as.list(rec$job_spec$env_vars)
+            } else {
+              list()
+            }
+            env_overrides <- utils::modifyList(
+              user_env,
+              list(
+                SLURMPILOT_BACKEND = "mock",
+                SLURMPILOT_WORK_DIR = rec$job_dir,
+                SLURMPILOT_CHUNK_ID = as.character(cid),
+                SLURM_ARRAY_TASK_ID = as.character(cid),
+                SLURM_CPUS_PER_TASK = as.character(rec$resources$cpus_per_task),
+                SLURMPILOT_ATTEMPT = as.character(ch$attempt),
+                SLURMPILOT_MOCK_FAULT = fault
+              )
             )
 
             proc <- processx::process$new(
@@ -616,7 +640,7 @@ MockSlurmBackend <- R6::R6Class(
               ),
               stdout = out_log,
               stderr = err_log,
-              env = sp_merge_env(env_overrides),
+              env = sp_merge_env(env_overrides, scrub_secrets = self$scrub_secrets),
               supervise = FALSE
             )
 
@@ -660,6 +684,8 @@ MockSlurmBackend <- R6::R6Class(
 #'   default `TRUE`).
 #' @param rscript_bin Optional explicit path to `Rscript`. Defaults to the active
 #'   R installation's `Rscript`.
+#' @param scrub_secrets Logical; scrub ambient host credential environment
+#'   variables before spawning workers. Default `TRUE`.
 #' @return A [MockSlurmBackend] R6 object.
 #' @export
 #' @examples
@@ -673,7 +699,8 @@ mock_slurm_backend <- function(
   mem_limit_mb = NULL,
   time_limit_sec = NULL,
   fault_injection = list(),
-  rscript_bin = NULL
+  rscript_bin = NULL,
+  scrub_secrets = TRUE
 ) {
   MockSlurmBackend$new(
     root_dir = root_dir,
@@ -682,6 +709,7 @@ mock_slurm_backend <- function(
     mem_limit_mb = mem_limit_mb,
     time_limit_sec = time_limit_sec,
     fault_injection = fault_injection,
-    rscript_bin = rscript_bin
+    rscript_bin = rscript_bin,
+    scrub_secrets = scrub_secrets
   )
 }

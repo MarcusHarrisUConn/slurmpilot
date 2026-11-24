@@ -240,13 +240,19 @@ scan_project_env <- function(
 ) {
   if (!is.null(path)) {
     checkmate::assert_directory_exists(path)
+    sp_is_confined_under_root <- function(p) {
+      isTRUE(tryCatch({
+        sp_assert_path_confined(p, root_dir = path, arg = "path")
+        TRUE
+      }, error = function(e) FALSE))
+    }
     if (is.null(renv_lock)) {
       cand <- file.path(path, "renv.lock")
-      if (file.exists(cand)) renv_lock <- cand
+      if (file.exists(cand) && sp_is_confined_under_root(cand)) renv_lock <- cand
     }
     if (is.null(description)) {
       cand <- file.path(path, "DESCRIPTION")
-      if (file.exists(cand)) description <- cand
+      if (file.exists(cand) && sp_is_confined_under_root(cand)) description <- cand
     }
     if (is.null(scripts)) {
       all_files <- list.files(
@@ -255,9 +261,14 @@ scan_project_env <- function(
         recursive = TRUE,
         full.names = TRUE
       )
-      # Exclude noisy directories
+      # Exclude noisy directories and external symlinks escaping project root
       keep <- !grepl("(^|/)(\\.git|renv|packrat|docs|_site|\\.Rcheck)(/|$)", all_files)
-      scripts <- all_files[keep]
+      cand_scripts <- all_files[keep]
+      if (length(cand_scripts) > 0L) {
+        scripts <- cand_scripts[vapply(cand_scripts, sp_is_confined_under_root, logical(1L))]
+      } else {
+        scripts <- character()
+      }
     }
   }
 

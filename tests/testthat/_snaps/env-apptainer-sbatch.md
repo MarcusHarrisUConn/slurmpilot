@@ -97,6 +97,13 @@
       export SLURMPILOT_CHUNK_ID="${SLURM_ARRAY_TASK_ID}"
       export SLURMPILOT_ATTEMPT=2
       export STAN_NUM_THREADS='2'
+      export APPTAINERENV_OMP_NUM_THREADS=2
+      export APPTAINERENV_OPENBLAS_NUM_THREADS=2
+      export APPTAINERENV_MKL_NUM_THREADS=2
+      export APPTAINERENV_SLURMPILOT_WORK_DIR="${WORK_DIR}"
+      export APPTAINERENV_SLURMPILOT_CHUNK_ID="${SLURM_ARRAY_TASK_ID}"
+      export APPTAINERENV_SLURMPILOT_ATTEMPT=2
+      export APPTAINERENV_STAN_NUM_THREADS='2'
       
       echo "[slurmpilot] Starting job ${SLURM_JOB_ID:-local} array task ${SLURM_ARRAY_TASK_ID} on $(hostname)"
       apptainer exec --cleanenv --bind '/scratch/mharris/dsem_sim:/scratch/mharris/dsem_sim' --bind '/data/readonly:/data/readonly:ro' '/scratch/containers/slurmpilot_env.sif' Rscript "${WORK_DIR}/worker.R" --work-dir "${WORK_DIR}" --chunk-id "${SLURM_ARRAY_TASK_ID}" --attempt "2"

@@ -16,7 +16,8 @@ pilot_run(
   packages = character(),
   globals = list(),
   isolate = TRUE,
-  progress = FALSE
+  progress = FALSE,
+  scrub_secrets = TRUE
 )
 }
 \arguments{
@@ -56,6 +57,10 @@ isolated OS RSS. Set \code{FALSE} only for fast in-process profiling.}
 
 \item{progress}{Logical; if \code{TRUE}, emits concise progress messages via
 \code{cli}. Default \code{FALSE}.}
+
+\item{scrub_secrets}{Logical; when \code{isolate = TRUE}, scrub ambient host
+secret/credential environment variables before spawning pilot child
+processes. Default \code{TRUE}.}
 }
 \value{
 An S3 object of class \code{"slurmpilot_pilot"} with elements:

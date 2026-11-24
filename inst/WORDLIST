@@ -33,6 +33,7 @@ Pre
 Profiler
 QOS
 Quickstart
+RCE
 Rmd
 SCP
 SHA
@@ -46,6 +47,7 @@ Walltime
 XSS
 ZeroMQ
 acyclicity
+async
 backoff
 bslib
 cancelled
@@ -68,6 +70,7 @@ makespan
 metacharacter
 misparsing
 mortem
+natively
 oversubscription
 parsers
 pluggable
@@ -79,10 +82,12 @@ retryable
 runnable
 sanitization
 stderr
+symlinks
 tibble
 toolchain
 toolchains
 unlists
 unparseable
+untrusted
 walltime
 workspaces

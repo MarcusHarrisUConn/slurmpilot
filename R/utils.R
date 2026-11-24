@@ -241,6 +241,9 @@ format_slurm_array_indices <- function(indices, max_concurrent = NULL) {
 #' indices.
 #'
 #' @param expr Character scalar SLURM array expression.
+#' @param max_indices Positive integer upper bound on the total number of
+#'   expanded array indices (guards against unbounded range expansion). Default
+#'   `100000L`.
 #'
 #' @return Integer vector of expanded array indices (`integer(0L)` for empty
 #'   strings).
@@ -248,15 +251,17 @@ format_slurm_array_indices <- function(indices, max_concurrent = NULL) {
 #' @examples
 #' parse_slurm_array_spec("1-10:2")
 #' parse_slurm_array_spec("1,3,5-9%4")
-parse_slurm_array_spec <- function(expr) {
-  sp_expand_slurm_array_expr(expr)
+parse_slurm_array_spec <- function(expr, max_indices = 100000L) {
+  sp_expand_slurm_array_expr(expr, max_indices = max_indices)
 }
 
-sp_expand_slurm_array_expr <- function(expr) {
+sp_expand_slurm_array_expr <- function(expr, max_indices = 100000L) {
+  checkmate::assert_int(max_indices, lower = 1L)
   if (is.null(expr) || length(expr) == 0L || is.na(expr[[1L]])) {
     return(integer(0L))
   }
-  expr <- trimws(as.character(expr[[1L]]))
+  expr_orig <- trimws(as.character(expr[[1L]]))
+  expr <- expr_orig
   # Strip surrounding brackets if present (from squeue e.g. [1-4,6%2])
   expr <- gsub("^\\[|\\]$", "", expr)
   # Strip optional concurrency throttle %N
@@ -265,9 +270,10 @@ sp_expand_slurm_array_expr <- function(expr) {
     return(integer(0L))
   }
   parts <- strsplit(expr, ",", fixed = TRUE)[[1L]]
-  out <- integer(0L)
-  for (p in parts) {
-    p <- trimws(p)
+  chunks_out <- vector("list", length(parts))
+  total_len <- 0
+  for (i in seq_along(parts)) {
+    p <- trimws(parts[[i]])
     if (!nzchar(p)) next
     step <- 1L
     if (grepl(":", p, fixed = TRUE)) {
@@ -278,18 +284,38 @@ sp_expand_slurm_array_expr <- function(expr) {
       if (is.na(step) || step < 1L) next
     }
     if (grepl("-", p, fixed = TRUE)) {
-      bounds <- suppressWarnings(as.integer(strsplit(p, "-", fixed = TRUE)[[1L]]))
-      if (length(bounds) == 2L && !any(is.na(bounds)) && bounds[[1L]] <= bounds[[2L]]) {
-        out <- c(out, seq.int(bounds[[1L]], bounds[[2L]], by = step))
+      bounds <- suppressWarnings(as.numeric(strsplit(p, "-", fixed = TRUE)[[1L]]))
+      if (length(bounds) == 2L && all(is.finite(bounds)) &&
+          all(bounds == floor(bounds)) && bounds[[1L]] <= bounds[[2L]]) {
+        range_len <- floor((bounds[[2L]] - bounds[[1L]]) / step) + 1
+        if (total_len + range_len > max_indices) {
+          cli::cli_abort(
+            "SLURM array expression {.val {expr_orig}} exceeds {.arg max_indices} ({max_indices})."
+          )
+        }
+        if (bounds[[2L]] > .Machine$integer.max || bounds[[1L]] < -.Machine$integer.max) {
+          cli::cli_abort(
+            "SLURM array expression {.val {expr_orig}} contains out-of-range integer bounds."
+          )
+        }
+        chunks_out[[i]] <- seq.int(as.integer(bounds[[1L]]), as.integer(bounds[[2L]]), by = step)
+        total_len <- total_len + range_len
       }
     } else {
       val <- suppressWarnings(as.integer(p))
       if (!is.na(val)) {
-        out <- c(out, val)
+        if (total_len + 1 > max_indices) {
+          cli::cli_abort(
+            "SLURM array expression {.val {expr_orig}} exceeds {.arg max_indices} ({max_indices})."
+          )
+        }
+        chunks_out[[i]] <- val
+        total_len <- total_len + 1
       }
     }
   }
-  unique(out)
+  out <- unlist(chunks_out, use.names = FALSE)
+  if (is.null(out)) integer(0L) else unique(as.integer(out))
 }
 
 #' Plan Load-Balanced SLURM Array Chunk Assignments
@@ -362,34 +388,71 @@ sp_partition_tasks <- function(
     task_lists <- Map(seq.int, starts, ends)
     chunk_w <- vapply(task_lists, function(idx) sum(weights[idx]), numeric(1L))
   } else if (strategy == "round_robin") {
-    buckets <- vector("list", n_chunks)
-    for (c_i in chunk_ids) buckets[[c_i]] <- integer(0L)
-    for (tid in seq_len(n_tasks)) {
-      b <- ((tid - 1L) %% n_chunks) + 1L
-      buckets[[b]] <- c(buckets[[b]], as.integer(tid))
-    }
-    task_lists <- buckets
-    starts <- vapply(task_lists, min, integer(1L))
-    ends <- vapply(task_lists, max, integer(1L))
-    chunk_w <- vapply(task_lists, function(idx) sum(weights[idx]), numeric(1L))
+    tids <- seq_len(n_tasks)
+    assign_b <- ((tids - 1L) %% n_chunks) + 1L
+    fac_b <- factor(assign_b, levels = chunk_ids)
+    task_lists <- unname(split(tids, fac_b))
+    starts <- vapply(task_lists, function(x) x[[1L]], integer(1L))
+    ends <- vapply(task_lists, function(x) x[[length(x)]], integer(1L))
+    chunk_w <- as.numeric(tapply(weights, fac_b, sum))
   } else {
     # LPT (Longest Processing Time first) greedy makespan minimization
     ord <- order(weights, decreasing = TRUE)
-    buckets <- vector("list", n_chunks)
-    for (c_i in chunk_ids) buckets[[c_i]] <- integer(0L)
+    chunk_assign <- integer(n_tasks)
     loads <- numeric(n_chunks)
-    counts <- integer(n_chunks)
 
-    for (tid in ord) {
-      # Pick minimum-load chunk (tie-break by count, then chunk_id)
-      best <- order(loads, counts, chunk_ids)[[1L]]
-      buckets[[best]] <- c(buckets[[best]], as.integer(tid))
-      loads[[best]] <- loads[[best]] + weights[[tid]]
-      counts[[best]] <- counts[[best]] + 1L
+    if (n_chunks == 1L) {
+      chunk_assign[] <- 1L
+      loads[[1L]] <- sum(weights)
+    } else if (n_chunks <= 2048L) {
+      # Fast C-level which.min() scan for typical SLURM array sizes
+      for (i in seq_len(n_tasks)) {
+        tid <- ord[[i]]
+        best <- which.min(loads)
+        chunk_assign[[tid]] <- best
+        loads[[best]] <- loads[[best]] + weights[[tid]]
+      }
+    } else {
+      # Binary min-heap O(N log M) for very large chunk counts
+      h_load <- numeric(n_chunks)
+      h_id <- chunk_ids
+      for (i in seq_len(n_tasks)) {
+        tid <- ord[[i]]
+        best <- h_id[[1L]]
+        chunk_assign[[tid]] <- best
+        new_load <- h_load[[1L]] + weights[[tid]]
+        h_load[[1L]] <- new_load
+        pos <- 1L
+        repeat {
+          left <- 2L * pos
+          if (left > n_chunks) break
+          right <- left + 1L
+          sm <- left
+          if (right <= n_chunks) {
+            rl <- h_load[[right]]
+            ll <- h_load[[left]]
+            if (rl < ll || (rl == ll && h_id[[right]] < h_id[[left]])) {
+              sm <- right
+            }
+          }
+          sl <- h_load[[sm]]
+          if (sl < new_load || (sl == new_load && h_id[[sm]] < best)) {
+            h_load[[pos]] <- sl
+            h_id[[pos]] <- h_id[[sm]]
+            h_load[[sm]] <- new_load
+            h_id[[sm]] <- best
+            pos <- sm
+          } else {
+            break
+          }
+        }
+      }
+      loads[h_id] <- h_load
     }
-    task_lists <- lapply(buckets, sort)
-    starts <- vapply(task_lists, min, integer(1L))
-    ends <- vapply(task_lists, max, integer(1L))
+
+    task_lists <- unname(split(seq_len(n_tasks), factor(chunk_assign, levels = chunk_ids)))
+    starts <- vapply(task_lists, function(x) x[[1L]], integer(1L))
+    ends <- vapply(task_lists, function(x) x[[length(x)]], integer(1L))
     chunk_w <- loads
   }
 

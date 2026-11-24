@@ -1,3 +1,71 @@
+# slurmpilot 0.5.0
+
+## Security Hardening & Independent Peer Red-Team Remediation
+- **Eliminated `cli` Glue `{...}` RCE (`R/globals.R`, `R/efficiency.R`):**
+  Audited every `cli::` call package-wide so untrusted dynamic warnings and
+  efficiency recommendations are interpolated safely via `{w}` / `{r}` without
+  evaluating embedded R expressions.
+- **Hardened `#SBATCH`, SSH, SCP, URL & Path Confinement Guards (`R/security.R`, `R/backend_ssh.R`, `R/sbatch.R`, `R/apptainer.R`, `R/env_scan.R`):**
+  - Blocked `--wrap`, `--prolog`/`--epilog`, `--output`/`--error`, `--export`,
+    quotes, and multi-flag smuggling in `extra_sbatch`, and disallowed spaces
+    in SLURM/container paths (`sp_assert_safe_path(allow_spaces = FALSE)`).
+  - Blocked dangerous SSH CLI flags (`-F`, `-S`, `-L/-R/-D/-W`, `-A`, `-J`,
+    `-i`, plus bundled variants) and directives (`IdentityFile`, `ControlPath`,
+    `ProxyJump`, `ForwardAgent`, `SendEnv`, `SetEnv`, etc.) in `ssh_options`,
+    and blocked whitespace/shell metacharacters in `build_scp_args()`.
+  - Hardened `sp_assert_path_confined()` via ancestor `Sys.readlink()` resolution
+    against non-existent `..` paths and dangling external symlinks, and enforced
+    root confinement in `scan_project_env()`.
+  - Blocked `$VAR` shell expansion in `cran_repo` URLs and omitted empty
+    `apt-get` blocks in `build_apptainer_def()`.
+- **Ambient Secret Scrubbing & Closure Audit Safety (`R/globals.R`, `R/pilot.R`, `R/backend_mock.R`, `R/shiny_submit.R`, `R/sbatch.R`):**
+  - Guarded `inspect_job_globals()` against evaluating active bindings, used
+    `serialize()` for accurate nested-environment sizing, and added nested
+    credential scanning (`$secret_objects`, `$active_bindings`).
+  - Added default `scrub_secrets = TRUE` to `pilot_run()`, `MockSlurmBackend`,
+    `mock_slurm_backend()`, and async Shiny pilots (scrubbing ambient credential
+    env vars and setting `R_ENVIRON_USER = ""` / `R_PROFILE_USER = ""`),
+    forwarded explicit `job_spec$env_vars` to mock workers, warned on secret
+    `env_vars` in `render_sbatch_script()`, and applied `0600` permissions to
+    written `.sbatch` files.
+
+## Container, Cluster, Pipeline, Parser, Shiny & Performance Fixes
+- **Native `rcapsule` Interoperability (`R/container_hook.R`):**
+  `use_rcapsule_container()` now natively consumes `rcapsule_apptainer_spec`,
+  `rcapsule_apptainer`, `rcapsule_manifest`, `rcapsule_bundle`, and
+  `rcapsule_export` objects (`def_content`, `def_sha256`, `bind_paths`,
+  `integrity$content_digest`, `specs$apptainer`, directory bundle `.def`
+  files) with zero hard dependency.
+- **POSIX Tilde Expansion & Apptainer `--cleanenv` Forwarding (`R/sbatch.R`, `R/backend_ssh.R`):**
+  - `remote_dir = "~/..."` now expands via `"$HOME"/'...'` across `mkdir`,
+    `sbatch`, `WORK_DIR`, and `--bind`, with home-relative `#SBATCH --output` /
+    `--error` paths.
+  - Exported `APPTAINERENV_*` counterparts for thread caps, `SLURMPILOT_*`, and
+    user `env_vars` (including `SLURMPILOT_CONTAINER_DIGEST`) whenever running
+    under `apptainer exec --cleanenv`.
+- **Scheduler, Pipeline & Efficiency Correctness (`R/backend_ssh.R`, `R/pipeline.R`, `R/efficiency.R`, `R/backend_base.R`):**
+  - Preserved per-job `container_binds` in `SlurmSshBackend$retry()` and
+    rejected `DRY_RUN` dependencies on live (`dry_run = FALSE`) submissions.
+  - Fixed `slurm_pipeline_run()` to reject unsupported `wait = FALSE` DAGs on
+    `MockSlurmBackend`, honor `stop_on_failure` and `"SKIPPED"`/`"OUT_OF_MEMORY"`/
+    `"TIMEOUT"` in `afterany`/`afternotok`, and gracefully mark 0-task dynamic
+    stages `"SKIPPED"`.
+  - Hardened `slurm_efficiency_report()` against missing `chunk_id`, `Inf`
+    metrics in `plot()`, zero-median straggler ratios (`Inf`), and 100%-failed
+    jobs (`classification = "failed"`).
+  - Union-aligned heterogeneous data-frame results in `slurm_collect(simplify = TRUE)`.
+- **Parser Safety, Shiny Resilience & LPT Speedup (`R/utils.R`, `R/backend_ssh.R`, `R/shiny_submit.R`, `R/resources.R`, `R/sbatch.R`):**
+  - Added `max_indices = 100000L` bound to `parse_slurm_array_spec()`,
+    vectorized `parse_squeue_output()` to $O(N)$, and preserved SLURM signal
+    exit codes (`128 + signal`) in `parse_sacct_output()`.
+  - Wrapped `mod_hpc_submit_server()` pilot/submission observers in `tryCatch()`
+    so empty or failing `args_builder` callbacks surface clean UI alerts instead
+    of crashing the Shiny session.
+  - Gated `SLURMPILOT_MOCK_FAULT` in `worker.R` strictly to `SLURMPILOT_BACKEND=mock`.
+  - Accelerated `plan_chunks(..., strategy = "lpt")` via C-level `which.min()`
+    plus an $O(N \log M)$ binary min-heap for `> 2048` chunks and eliminated
+    duplicate partitioning in `estimate_resources()` and `scale_resources()`.
+
 # slurmpilot 0.4.0
 
 ## New Research-Workflow Capabilities

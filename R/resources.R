@@ -294,7 +294,7 @@ estimate_resources <- function(
     )
   }
 
-  res <- resource_spec(
+  res <- sp_build_resource_spec(
     n_tasks = n_tasks,
     chunk_size = chunk_size,
     mem_mb = mem_mb,
@@ -305,7 +305,8 @@ estimate_resources <- function(
     qos = qos,
     max_concurrent = max_concurrent,
     strategy = strategy,
-    task_weights = eff_weights
+    task_weights = eff_weights,
+    precomputed_chunks = preview_chunks
   )
 
   res$estimates <- list(
@@ -387,6 +388,36 @@ resource_spec <- function(
   strategy = c("contiguous", "round_robin", "lpt"),
   task_weights = NULL
 ) {
+  sp_build_resource_spec(
+    n_tasks = n_tasks,
+    chunk_size = chunk_size,
+    mem_mb = mem_mb,
+    time_minutes = time_minutes,
+    cpus_per_task = cpus_per_task,
+    partition = partition,
+    account = account,
+    qos = qos,
+    max_concurrent = max_concurrent,
+    strategy = strategy,
+    task_weights = task_weights,
+    precomputed_chunks = NULL
+  )
+}
+
+sp_build_resource_spec <- function(
+  n_tasks,
+  chunk_size = 1L,
+  mem_mb = 1024,
+  time_minutes = 15,
+  cpus_per_task = 1L,
+  partition = NULL,
+  account = NULL,
+  qos = NULL,
+  max_concurrent = NULL,
+  strategy = c("contiguous", "round_robin", "lpt"),
+  task_weights = NULL,
+  precomputed_chunks = NULL
+) {
   checkmate::assert_int(n_tasks, lower = 1L)
   checkmate::assert_int(chunk_size, lower = 1L)
   checkmate::assert_number(mem_mb, lower = 16, finite = TRUE)
@@ -399,7 +430,11 @@ resource_spec <- function(
   strategy <- match.arg(strategy)
 
   chunk_size <- min(as.integer(chunk_size), as.integer(n_tasks))
-  chunks <- sp_partition_tasks(n_tasks, chunk_size, strategy = strategy, task_weights = task_weights)
+  chunks <- if (!is.null(precomputed_chunks)) {
+    precomputed_chunks
+  } else {
+    sp_partition_tasks(n_tasks, chunk_size, strategy = strategy, task_weights = task_weights)
+  }
   n_chunks <- nrow(chunks)
 
   mem_mb_int <- as.integer(ceiling(mem_mb))
@@ -476,7 +511,7 @@ scale_resources <- function(
     sp_ceil_to((resources$time_sec / 60) * time_multiplier, time_round_minutes)
   }
 
-  updated <- resource_spec(
+  updated <- sp_build_resource_spec(
     n_tasks = resources$n_tasks,
     chunk_size = resources$chunk_size,
     mem_mb = new_mem,
@@ -485,11 +520,10 @@ scale_resources <- function(
     partition = resources$partition,
     account = resources$account,
     qos = resources$qos,
-    max_concurrent = resources$max_concurrent
+    max_concurrent = resources$max_concurrent,
+    strategy = resources$strategy %||% "contiguous",
+    precomputed_chunks = resources$chunks
   )
-  # Preserve exact original chunk assignments (including round_robin / lpt)
-  updated$chunks <- resources$chunks
-  updated$strategy <- resources$strategy %||% "contiguous"
   updated$estimates <- resources$estimates
   updated$assumptions <- resources$assumptions
   updated

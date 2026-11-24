@@ -242,6 +242,9 @@ sp_summarize_pilot_trials <- function(trials) {
 #'   isolated OS RSS. Set `FALSE` only for fast in-process profiling.
 #' @param progress Logical; if `TRUE`, emits concise progress messages via
 #'   `cli`. Default `FALSE`.
+#' @param scrub_secrets Logical; when `isolate = TRUE`, scrub ambient host
+#'   secret/credential environment variables before spawning pilot child
+#'   processes. Default `TRUE`.
 #'
 #' @return An S3 object of class `"slurmpilot_pilot"` with elements:
 #'   - `trials`: a [tibble::tibble()] with one row per pilot trial containing
@@ -279,7 +282,8 @@ pilot_run <- function(
   packages = character(),
   globals = list(),
   isolate = TRUE,
-  progress = FALSE
+  progress = FALSE,
+  scrub_secrets = TRUE
 ) {
   checkmate::assert_function(fun)
   if (!is.list(args_list)) {
@@ -305,6 +309,7 @@ pilot_run <- function(
   }
   checkmate::assert_flag(isolate)
   checkmate::assert_flag(progress)
+  checkmate::assert_flag(scrub_secrets)
 
   selected_idx <- sp_select_pilot_indices(n_total, n_pilot, sample_method, seed = seed)
 
@@ -345,9 +350,16 @@ pilot_run <- function(
 
       t_spawn_wall <- as.numeric(Sys.time())
       t_spawn_mono <- proc.time()[["elapsed"]]
+      child_env <- if (isTRUE(scrub_secrets)) {
+        sp_callr_scrubbed_env()
+      } else {
+        callr::rcmd_safe_env()
+      }
       proc <- callr::r_bg(
         func = sp_pilot_child_runner,
         args = list(payload_path = payload_path),
+        env = child_env,
+        user_profile = FALSE,
         supervise = FALSE
       )
       live_procs[[k]] <- proc

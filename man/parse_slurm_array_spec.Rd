@@ -4,10 +4,14 @@
 \alias{parse_slurm_array_spec}
 \title{Parse a SLURM Array Expression into Expanded Integer Indices}
 \usage{
-parse_slurm_array_spec(expr)
+parse_slurm_array_spec(expr, max_indices = 100000L)
 }
 \arguments{
 \item{expr}{Character scalar SLURM array expression.}
+
+\item{max_indices}{Positive integer upper bound on the total number of
+expanded array indices (guards against unbounded range expansion). Default
+\code{100000L}.}
 }
 \value{
 Integer vector of expanded array indices (\code{integer(0L)} for empty
